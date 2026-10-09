@@ -1,0 +1,22 @@
+{
+  "name": "infographic-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal infographic studio: Cloudflare Pages app + Claude Code routine builder",
+  "scripts": {
+    "dev": "wrangler pages dev public --kv STUDIO_KV --port 8788",
+    "worker": "node routine/worker.mjs",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "playwright-core": "^1.56.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.40.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261006.1": true
+  }
+}

@@ -1,0 +1,164 @@
+// Qwen-powered steps: brief suggestions, fact research, script writing, palettes.
+// Each function returns plain data; the studio decides where to put it.
+
+import { chatStream, api } from './api.js';
+import { extractJSON, validPalette, contrast, COLOR_KEYS } from './util.js';
+
+const LANGNAME = { ko: 'Korean', en: 'English' };
+const today = () => new Date().toISOString().slice(0, 10);
+
+function langOf(p) { return LANGNAME[(p.brief && p.brief.language) || 'ko'] || 'Korean'; }
+
+function briefBlock(p) {
+  const b = p.brief || {};
+  return [
+    `Topic: ${b.topic || p.title || ''}`,
+    b.takeaway && `Takeaway: ${b.takeaway}`,
+    b.audience && `Audience: ${b.audience}`,
+    b.tone && `Tone: ${b.tone}`,
+    `Format: ${b.format === 'static' ? 'static one-page infographic' : `animated video, about ${b.length || 45} seconds`}, ratio ${b.ratio || '16:9'}`,
+    `Language: ${langOf(p)}`,
+    b.notes && `Owner notes: ${b.notes}`,
+  ].filter(Boolean).join('\n');
+}
+
+function factsBlock(p) {
+  const items = (p.facts && p.facts.items) || [];
+  if (!items.length) return 'FACTS: none yet (do not invent numbers; stay qualitative).';
+  return 'FACTS (the only numbers you may use):\n' + items.map((f, i) =>
+    `${i + 1}. ${f.claim}${f.value ? ` [${f.value}]` : ''}${f.date ? ` (${f.date})` : ''}${f.source ? ` — ${f.source}` : ''}`).join('\n');
+}
+
+async function json(messages, opts = {}) {
+  const res = await chatStream({ messages, role: 'writer', thinking: opts.thinking ?? true }, { signal: opts.signal, onDelta: opts.onDelta });
+  return extractJSON(res.content);
+}
+
+/* ---------- brief ---------- */
+export async function suggestBrief(p, direction, opts) {
+  const sys = 'You are a senior infographic editor. Reply with JSON only.';
+  const user = `${briefBlock(p)}\n${direction ? `Direction from the owner: ${direction}\n` : ''}
+Sharpen this into a brief. Return JSON:
+{"title": "short project title", "takeaway": "ONE sentence a viewer should remember", "audience": "who it is for", "tone": "2-4 words"}
+Write the values in ${langOf(p)}. Keep the owner's topic; make the takeaway concrete and specific.`;
+  return json([{ role: 'system', content: sys }, { role: 'user', content: user }], { thinking: false, ...opts });
+}
+
+/* ---------- facts ---------- */
+export async function researchFacts(p, focus) {
+  const input = `You are researching facts for an infographic.
+${briefBlock(p)}
+${focus ? `Research focus: ${focus}\n` : ''}Today is ${today()}. Search the web. Prefer primary and official sources (statistics agencies, company filings, central banks, reputable newsrooms) and the most recent figures.
+
+Return ONLY a JSON object, no prose:
+{"facts":[{"claim":"one-sentence fact in ${langOf(p)}","value":"the key number with its unit","date":"the period or as-of date of the number","source":"publisher name","url":"the exact page you used"}],
+ "summary":"two sentences in ${langOf(p)} on what the data says"}
+Give 5 to 10 facts that together support (or correct) the takeaway. Every fact needs a real URL you used. Never invent or round numbers beyond what the source says.`;
+  const r = await api('ai/research', { method: 'POST', body: { input } });
+  let parsed;
+  try { parsed = extractJSON(r.text); } catch { parsed = { facts: [], summary: r.text.slice(0, 600) }; }
+  const items = (parsed.facts || []).filter((f) => f && f.claim).slice(0, 14).map((f, i) => ({
+    id: 'f' + (i + 1) + Math.random().toString(36).slice(2, 5),
+    claim: String(f.claim || ''),
+    value: String(f.value || ''),
+    date: String(f.date || ''),
+    source: String(f.source || ''),
+    url: /^https?:\/\//.test(f.url || '') ? f.url : '',
+  }));
+  return { items, summary: parsed.summary || '', sources: r.sources || [], queries: r.queries || [], at: Date.now() };
+}
+
+/* ---------- script ---------- */
+function sceneCount(p) {
+  const len = Number(p.brief && p.brief.length) || 45;
+  return Math.max(4, Math.min(12, Math.round(len / 5)));
+}
+
+const SCRIPT_RULES = (p) => {
+  const isStatic = p.brief && p.brief.format === 'static';
+  const L = langOf(p);
+  if (isStatic) {
+    return `This is a STATIC one-page infographic. Write 4 to 7 SECTIONS, top to bottom.
+- id: s1, s2, ... in order.
+- title: short section heading in ${L}.
+- narration: "" (empty — nothing is spoken).
+- onscreen: the exact text for that section in ${L}: a headline, the hero number with its unit, and at most two short supporting lines. Use " / " between items.
+- visual: a concrete drawable idea (chart type with the actual numbers, icon metaphor, layout).
+- seconds: 0.
+- Section 1 states the takeaway. The last section is a footer: takeaway, "as of ${today()}" and a one-line source.`;
+  }
+  return `This is an ANIMATED infographic of about ${(p.brief && p.brief.length) || 45} seconds: write ${sceneCount(p)} scenes (one idea per 3–6 seconds).
+- id: s1, s2, ... in order.
+- title: short label for the scene.
+- narration: what the voice says, in ${L}: natural, short sentences. It must fit the scene: Korean ≈ 6 syllables per second, English ≈ 2.6 words per second.
+- Put cue markers {1}, {2}, {3} (max 3 per scene, numbering restarts every scene) directly before the words a visual should land on, e.g. "원두값은 {1}1년 만에 {2}38% 올랐습니다".
+- onscreen: only the few words shown on screen in ${L} — headline, hero number with unit, labels — much shorter than the narration. Use " / " between items.
+- visual: a concrete drawable idea for the designer (chart type with the actual numbers, icon metaphor, layout, what each cue reveals).
+- seconds: your estimate for the scene.
+- Scene 1 hooks the viewer and states the takeaway in plain words. The last scene is the end card: takeaway, "as of ${today()}" and a one-line source.
+- One hero element per scene. Use only numbers from FACTS.`;
+};
+
+export async function writeScript(p, { direction, sceneId, signal, onDelta } = {}) {
+  const scenes = (p.script && p.script.scenes) || [];
+  const sys = 'You are an award-winning motion-infographic scriptwriter. Reply with JSON only.';
+  if (sceneId) {
+    const idx = scenes.findIndex((s) => s.id === sceneId);
+    const user = `${briefBlock(p)}\n\n${factsBlock(p)}\n\nCurrent script:\n${JSON.stringify(scenes, null, 1)}\n\n${SCRIPT_RULES(p)}\n\nRewrite ONLY scene "${sceneId}" (scene ${idx + 1} of ${scenes.length}) so it flows with its neighbours.${direction ? `\nOwner's direction: ${direction}` : ''}\nReturn JSON: {"scene": {"id":"${sceneId}","title":"...","narration":"...","onscreen":"...","visual":"...","seconds":5}}`;
+    const r = await json([{ role: 'system', content: sys }, { role: 'user', content: user }], { signal, onDelta });
+    const s = r.scene || r;
+    return { scene: normScene(s, sceneId) };
+  }
+  const user = `${briefBlock(p)}\n\n${factsBlock(p)}\n\n${SCRIPT_RULES(p)}${scenes.length ? `\n\nThe current script (improve on it):\n${JSON.stringify(scenes, null, 1)}` : ''}${direction ? `\n\nOwner's direction: ${direction}` : ''}\n\nReturn JSON: {"scenes":[{"id":"s1","title":"...","narration":"...","onscreen":"...","visual":"...","seconds":5}]}`;
+  const r = await json([{ role: 'system', content: sys }, { role: 'user', content: user }], { signal, onDelta });
+  const list = (r.scenes || []).map((s, i) => normScene(s, 's' + (i + 1)));
+  if (!list.length) throw new Error('The model returned no scenes');
+  return { scenes: list };
+}
+
+function normScene(s, id) {
+  return {
+    id: String(s.id || id).replace(/[^\w-]/g, '').slice(0, 20) || id,
+    title: String(s.title || '').slice(0, 120),
+    narration: String(s.narration || '').slice(0, 1200),
+    onscreen: String(s.onscreen || '').slice(0, 600),
+    visual: String(s.visual || '').slice(0, 600),
+    seconds: Math.max(0, Math.min(30, Number(s.seconds) || 0)),
+  };
+}
+
+/* ---------- palettes ---------- */
+const PALETTE_RULES = `Each palette has colors {bg, surface, text, muted, accent, accent2, accent3} as #rrggbb:
+- text on bg contrast at least 7:1; muted on bg at least 4.5:1; accent readable as large text on bg (at least 3:1)
+- surface is a card colour slightly offset from bg; accent2 and accent3 are clearly different from accent and each other
+- suited to a data/infographic video: calm background, 1 strong accent, 2 supporting accents`;
+
+export function scorePalette(c) {
+  return { text: +contrast(c.text, c.bg).toFixed(1), muted: +contrast(c.muted, c.bg).toFixed(1), accent: +contrast(c.accent, c.bg).toFixed(1) };
+}
+
+export async function suggestPalettes(p, direction, opts) {
+  const user = `${briefBlock(p)}\n${direction ? `Owner's direction: ${direction}\n` : ''}\nPropose 3 distinct colour palettes for this infographic.\n${PALETTE_RULES}\nReturn JSON: {"palettes":[{"name":"short name","colors":{...},"why":"one short sentence in ${langOf(p)}"}]}`;
+  const r = await json([{ role: 'system', content: 'You are a brand and data-visualisation colour designer. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, ...opts });
+  return (r.palettes || []).filter((x) => validPalette(x.colors)).slice(0, 4).map((x) => ({
+    name: String(x.name || 'Palette').slice(0, 40),
+    colors: Object.fromEntries(COLOR_KEYS.map((k) => [k, x.colors[k].toLowerCase()])),
+    why: String(x.why || '').slice(0, 200),
+  }));
+}
+
+export async function paletteFromSite(p, url, opts) {
+  const site = await api('palette-from-url', { method: 'POST', body: { url } });
+  if (!site.colors || !site.colors.length) throw new Error('No colours found on that page');
+  const list = site.colors.map((c) => `${c.hex} (used ${c.n}x, chroma ${c.chroma})`).join('\n');
+  const user = `Brand website: ${site.url} — "${site.title}"\nMost used colours on the site:\n${list}\n\n${briefBlock(p)}\n\nBuild ONE palette that clearly belongs to this brand (its main brand colour becomes accent; keep its light/dark feel unless it hurts readability).\n${PALETTE_RULES}\nReturn JSON: {"name":"short name","colors":{...},"why":"one short sentence in ${langOf(p)}"}`;
+  const r = await json([{ role: 'system', content: 'You are a brand colour designer. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, ...opts });
+  const x = r.colors ? r : (r.palette || r);
+  if (!validPalette(x.colors)) throw new Error('The model returned an invalid palette');
+  return {
+    name: String(x.name || site.title || 'Brand').slice(0, 40),
+    colors: Object.fromEntries(COLOR_KEYS.map((k) => [k, x.colors[k].toLowerCase()])),
+    why: String(x.why || '').slice(0, 200),
+    site: site.url,
+  };
+}

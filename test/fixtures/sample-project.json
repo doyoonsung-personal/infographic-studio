@@ -1,0 +1,32 @@
+{
+  "title": "Infographic Studio 소개",
+  "brief": {
+    "topic": "Infographic Studio가 일하는 방식",
+    "takeaway": "주제 하나만 입력하면 리서치부터 영상까지 한 화면에서 끝난다",
+    "audience": "사내 동료",
+    "format": "animated",
+    "ratio": "16:9",
+    "length": 20,
+    "language": "ko",
+    "tone": "밝고 명료하게"
+  },
+  "facts": { "items": [] },
+  "script": {
+    "scenes": [
+      { "id": "s1", "title": "타이틀", "narration": "{1}주제 하나로 {2}인포그래픽 영상을 만듭니다.", "onscreen": "주제 하나로 시작하는 인포그래픽", "visual": "큰 헤드라인, 커서가 깜박이는 입력창" },
+      { "id": "s2", "title": "파이프라인", "narration": "{1}브리프, 팩트, 스크립트, {2}스타일과 보이스, 그리고 {3}Claude의 빌드까지.", "onscreen": "6단계 파이프라인", "visual": "노드 6개가 차례로 연결" },
+      { "id": "s3", "title": "화면 비율", "narration": "{1}가로, {2}세로, {3}정사각형까지 원하는 비율로.", "onscreen": "16:9 · 9:16 · 1:1 · 4:5", "visual": "비율별 사각형이 자라남" },
+      { "id": "s4", "title": "엔드 카드", "narration": "{1}이제 주제만 입력하세요.", "onscreen": "주제만 입력하세요", "visual": "테이크어웨이 + 날짜 + 출처" }
+    ]
+  },
+  "style": {
+    "paletteId": "midnight-orange",
+    "colors": { "bg": "#0f1420", "surface": "#1a2133", "text": "#f2f4f8", "muted": "#9aa4b8", "accent": "#ff7a1a", "accent2": "#3ec6ff", "accent3": "#9b7bff" },
+    "font": "sans",
+    "motion": "lively"
+  },
+  "voice": { "enabled": false },
+  "music": { "enabled": false },
+  "edits": { "texts": {} },
+  "build": { "current": null }
+}

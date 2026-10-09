@@ -1,0 +1,113 @@
+// UI strings: Korean (default) and English. t('key', {var}) fills {var} placeholders.
+
+const S = {
+  ko: {
+    appSub: '인포그래픽 스튜디오',
+    login_title: '로그인', login_body: '이 스튜디오는 비밀번호로 보호됩니다.', password: '비밀번호', signin: '들어가기',
+    wrong_pw: '비밀번호가 맞지 않습니다', logout: '로그아웃', admin: '관리', projects: '프로젝트',
+    saved: '저장됨', saving: '저장 중…', unsaved: '저장 대기', save_failed: '저장 실패',
+    new_title: '어떤 인포그래픽을 만들까요?', new_ph: '예: 2026년 커피 원두 가격은 왜 올랐을까? / 우리 팀 3분기 성과 요약',
+    create: '만들기', animated: '영상', static: '정지 이미지', length: '길이', sec: '초', language: '언어', ratio: '비율',
+    no_projects: '아직 프로젝트가 없습니다. 위에서 주제를 입력해 시작하세요.', delete: '삭제', confirm_delete: '"{t}" 프로젝트를 삭제할까요?',
+    updated: '수정', open: '열기', regen: '다시 생성', generate: '생성', cancel: '취소', ok: '확인', apply: '적용', close: '닫기', add: '추가', remove: '삭제', reset: '되돌리기', restore: '복원',
+    history: '이전 버전', no_history: '이전 버전 없음',
+    n_brief: '브리프', n_facts: '팩트', n_script: '스크립트', n_style: '스타일', n_voice: '보이스', n_music: '음악', n_build: 'Claude 빌드', n_preview: '미리보기 · 내보내기',
+    k_brief: '주제 · 메시지', k_facts: 'Qwen3.8 · 웹 검색', k_script: 'Qwen3.8 · 장면 구성', k_style: '색 · 폰트 · 모션', k_voice: 'ElevenLabs TTS', k_music: 'ElevenLabs Music', k_build: 'Claude 루틴 · 내 구독', k_preview: '재생 · 텍스트 수정 · 다운로드',
+    st_empty: '비어 있음', st_ready: '준비', st_done: '완료', st_stale: '갱신 필요', st_off: '사용 안 함', st_running: '진행 중', st_error: '오류', st_partial: '일부',
+    direction: '새 방향 주기', direction_ph: '예: 더 짧고 임팩트 있게 / 숫자 위주로 / 20대 대상으로',
+    topic: '주제', takeaway: '핵심 메시지 (한 문장)', audience: '대상', tone: '톤', notes: '메모', format: '형식',
+    suggest: 'AI 제안', suggest_brief_done: '브리프를 채웠습니다.',
+    research: '리서치', research_focus: '리서치 초점 (선택)', facts_empty: '아직 팩트가 없습니다. 리서치를 실행하거나 직접 추가하세요.',
+    claim: '내용', value: '수치', date: '기준일', source: '출처', url: 'URL', sources_found: '검색된 출처 {n}개',
+    write_script: '스크립트 쓰기', rewrite_scene: '이 장면만 다시 쓰기', scene_add: '장면 추가', scenes: '장면', narration: '내레이션', onscreen: '화면 텍스트', visual: '비주얼 아이디어', seconds: '초',
+    cue_hint: '내레이션의 {1}, {2} 표시는 그 단어가 나올 때 화면 요소가 등장하는 큐입니다.',
+    total: '총 {d}', palettes: '팔레트', colors: '색상', font: '폰트', motion: '모션', calm: '차분하게', lively: '경쾌하게',
+    suggest_palettes: 'AI 팔레트 제안', from_site: '웹사이트 색 가져오기', site_url: '브랜드 웹사이트 URL', contrast_low: '글자 대비가 낮습니다 ({r}:1). 4.5:1 이상 권장.',
+    voice_on: '보이스 사용', voice_pick: '목소리', speed: '속도', gen_all_voice: '모든 장면 보이스 생성', gen_missing_voice: '빠진 장면만 생성', no_voices: '관리 페이지에서 목소리 목록을 먼저 만드세요.',
+    clip_missing: '없음', clip_stale: '내레이션이 바뀜', clip_ok: '{d}초', play: '재생', stop: '정지',
+    music_on: '음악 사용', music_style: '스타일', music_custom: '직접 프롬프트', volume: '볼륨', gen_music: '음악 생성', music_len: '길이 {d}초 (영상에 맞춤)', music_stale: '영상 길이가 바뀌어 다시 생성이 필요합니다.',
+    build_new: 'Claude로 빌드', build_hint: 'Claude Code 루틴이 클라우드에서 디자인 → 프레임 점검 → MP4 렌더까지 합니다. 보통 5–15분, 내 구독 사용량을 씁니다.',
+    revise: '수정 요청', revise_ph: '예: 3번 장면 숫자를 더 크게, 막대가 더 천천히 자라게', revise_scene: '대상 장면', all_scenes: '전체',
+    rerender: '현재 수정으로 다시 렌더', rerender_hint: '텍스트·색 변경을 영상에 반영합니다 (디자인은 그대로).',
+    job_running: '진행 중', job_watch: '세션 보기', job_done: '완료 — v{v}', job_failed: '실패', job_queued: '대기 중',
+    versions: '버전', use_version: '이 버전 사용', no_versions: '아직 빌드가 없습니다.',
+    confirm_build: 'Claude 빌드를 시작할까요?', confirm_build_body: '루틴 1회 실행이 내 Claude 구독 사용량을 씁니다.',
+    voice_not_ready: '보이스가 켜져 있지만 {n}개 장면의 음성이 없거나 오래됐습니다. 지금 빌드하면 예상 길이로 맞춥니다.',
+    routine_off: '루틴이 연결되지 않았습니다 (ROUTINE_FIRE_URL / ROUTINE_TOKEN).',
+    preview_empty: '아직 빌드된 버전이 없습니다.\n스크립트를 만든 뒤 Claude 빌드를 실행하세요.',
+    texts: '화면 텍스트 수정', texts_hint: '바로 미리보기에 반영됩니다. 영상 파일에는 “다시 렌더” 후 반영됩니다.',
+    download: '다운로드', mp4: 'MP4', png: 'PNG', pdf: 'PDF', poster: '포스터', out_of_date: '영상 파일이 현재 수정보다 오래됐습니다.',
+    chat_title: '어시스턴트', chat_ph: '무엇을 바꿀까요? (Enter 전송, Shift+Enter 줄바꿈)', send: '보내기',
+    chat_hello: '안녕하세요! 주제를 다듬고, 팩트를 찾고, 스크립트·색·목소리·음악을 정하는 걸 도와드릴게요. 무엇부터 할까요?',
+    chips: ['팩트 리서치해줘', '스크립트 써줘', '더 밝은 색으로', '20초로 줄여줘', '빌드해줘'],
+    confirm_action: '실행', paid_note: '비용이 드는 작업이라 확인이 필요합니다.',
+    tab_chat: '채팅', tab_nodes: '단계',
+    admin_title: '관리', voices: '목소리 목록', voices_hint: '사용자가 드롭다운에서 고를 목소리입니다. ElevenLabs 계정의 목소리를 불러오거나 직접 추가하세요.',
+    import_voices: 'ElevenLabs에서 불러오기', name: '이름', voice_id: 'Voice ID', model: '모델', lang: '언어', preview: '미리듣기',
+    music_styles: '음악 스타일', prompt: '프롬프트', models: '모델', chat_model: '채팅', writer_model: '스크립트', research_model: '리서치', tts_model: 'TTS 기본', music_model: '음악',
+    defaults: '기본값', save: '저장', saved_ok: '저장했습니다', services: '연결 상태', test_routine: '루틴 테스트 (ping)', test_routine_hint: '루틴이 앱에 연결되는지 확인합니다. 짧은 실행 1회가 구독 사용량을 조금 씁니다.',
+    add_to_list: '목록에 추가', in_list: '추가됨', palette_name: '팔레트 이름',
+  },
+  en: {
+    appSub: 'infographic studio',
+    login_title: 'Sign in', login_body: 'This studio is password protected.', password: 'Password', signin: 'Enter',
+    wrong_pw: 'Wrong password', logout: 'Sign out', admin: 'Admin', projects: 'Projects',
+    saved: 'Saved', saving: 'Saving…', unsaved: 'Unsaved', save_failed: 'Save failed',
+    new_title: 'What should we make an infographic about?', new_ph: 'e.g. Why did coffee bean prices rise in 2026? / Our team’s Q3 results',
+    create: 'Create', animated: 'Video', static: 'Still image', length: 'Length', sec: 's', language: 'Language', ratio: 'Ratio',
+    no_projects: 'No projects yet. Type a topic above to start.', delete: 'Delete', confirm_delete: 'Delete "{t}"?',
+    updated: 'Updated', open: 'Open', regen: 'Regenerate', generate: 'Generate', cancel: 'Cancel', ok: 'OK', apply: 'Apply', close: 'Close', add: 'Add', remove: 'Remove', reset: 'Reset', restore: 'Restore',
+    history: 'Earlier versions', no_history: 'No earlier versions',
+    n_brief: 'Brief', n_facts: 'Facts', n_script: 'Script', n_style: 'Style', n_voice: 'Voice', n_music: 'Music', n_build: 'Claude build', n_preview: 'Preview · Export',
+    k_brief: 'topic · message', k_facts: 'Qwen3.8 · web search', k_script: 'Qwen3.8 · scenes', k_style: 'colour · font · motion', k_voice: 'ElevenLabs TTS', k_music: 'ElevenLabs Music', k_build: 'Claude routine · my plan', k_preview: 'play · edit text · download',
+    st_empty: 'Empty', st_ready: 'Ready', st_done: 'Done', st_stale: 'Needs update', st_off: 'Off', st_running: 'Running', st_error: 'Error', st_partial: 'Partial',
+    direction: 'Give new direction', direction_ph: 'e.g. shorter and punchier / focus on numbers / for people in their 20s',
+    topic: 'Topic', takeaway: 'Takeaway (one sentence)', audience: 'Audience', tone: 'Tone', notes: 'Notes', format: 'Format',
+    suggest: 'AI suggest', suggest_brief_done: 'Filled in the brief.',
+    research: 'Research', research_focus: 'Research focus (optional)', facts_empty: 'No facts yet. Run research or add them yourself.',
+    claim: 'Claim', value: 'Value', date: 'As of', source: 'Source', url: 'URL', sources_found: '{n} sources found',
+    write_script: 'Write script', rewrite_scene: 'Rewrite this scene', scene_add: 'Add scene', scenes: 'Scenes', narration: 'Narration', onscreen: 'On-screen text', visual: 'Visual idea', seconds: 'sec',
+    cue_hint: 'Markers like {1}, {2} in the narration are cues: the matching visual appears when that word is spoken.',
+    total: 'Total {d}', palettes: 'Palettes', colors: 'Colours', font: 'Font', motion: 'Motion', calm: 'Calm', lively: 'Lively',
+    suggest_palettes: 'AI palette ideas', from_site: 'Colours from a website', site_url: 'Brand website URL', contrast_low: 'Low text contrast ({r}:1). Aim for 4.5:1 or more.',
+    voice_on: 'Use narration', voice_pick: 'Voice', speed: 'Speed', gen_all_voice: 'Generate all scenes', gen_missing_voice: 'Only missing scenes', no_voices: 'Add voices on the Admin page first.',
+    clip_missing: 'missing', clip_stale: 'narration changed', clip_ok: '{d}s', play: 'Play', stop: 'Stop',
+    music_on: 'Use music', music_style: 'Style', music_custom: 'Custom prompt', volume: 'Volume', gen_music: 'Generate music', music_len: 'Length {d}s (fits the video)', music_stale: 'The video length changed; regenerate the music.',
+    build_new: 'Build with Claude', build_hint: 'Your Claude Code routine designs, checks frames and renders the MP4 in the cloud. Usually 5–15 min; uses your Claude plan.',
+    revise: 'Request changes', revise_ph: 'e.g. make the number in scene 3 bigger, slow the bars down', revise_scene: 'Scene', all_scenes: 'All',
+    rerender: 'Re-render with current edits', rerender_hint: 'Bakes text and colour edits into the video (same design).',
+    job_running: 'Running', job_watch: 'Watch session', job_done: 'Done — v{v}', job_failed: 'Failed', job_queued: 'Queued',
+    versions: 'Versions', use_version: 'Use this version', no_versions: 'No builds yet.',
+    confirm_build: 'Start a Claude build?', confirm_build_body: 'One routine run uses your Claude plan.',
+    voice_not_ready: 'Narration is on but {n} scene(s) have missing or outdated audio. Building now uses estimated timing.',
+    routine_off: 'The routine is not connected (ROUTINE_FIRE_URL / ROUTINE_TOKEN).',
+    preview_empty: 'No build yet.\nWrite a script, then run a Claude build.',
+    texts: 'Edit on-screen text', texts_hint: 'Shows in the preview right away; the video file updates after “Re-render”.',
+    download: 'Download', mp4: 'MP4', png: 'PNG', pdf: 'PDF', poster: 'Poster', out_of_date: 'The video file is older than your current edits.',
+    chat_title: 'Assistant', chat_ph: 'What should change? (Enter to send, Shift+Enter for a new line)', send: 'Send',
+    chat_hello: 'Hi! I can sharpen the topic, research facts, write the script, and pick colours, voice and music. Where shall we start?',
+    chips: ['Research the facts', 'Write the script', 'Brighter colours', 'Make it 20 seconds', 'Build it'],
+    confirm_action: 'Run', paid_note: 'This costs credits, so it needs your OK.',
+    tab_chat: 'Chat', tab_nodes: 'Steps',
+    admin_title: 'Admin', voices: 'Voice list', voices_hint: 'The voices people pick from the dropdown. Import from your ElevenLabs account or add them by hand.',
+    import_voices: 'Import from ElevenLabs', name: 'Name', voice_id: 'Voice ID', model: 'Model', lang: 'Lang', preview: 'Preview',
+    music_styles: 'Music styles', prompt: 'Prompt', models: 'Models', chat_model: 'Chat', writer_model: 'Script', research_model: 'Research', tts_model: 'Default TTS', music_model: 'Music',
+    defaults: 'Defaults', save: 'Save', saved_ok: 'Saved', services: 'Connections', test_routine: 'Test the routine (ping)', test_routine_hint: 'Checks the routine can reach the app. One short run uses a little of your plan.',
+    add_to_list: 'Add to list', in_list: 'Added', palette_name: 'Palette name',
+  },
+};
+
+let lang = 'ko';
+try { lang = localStorage.getItem('is_lang') || 'ko'; } catch {}
+
+export function getLang() { return lang; }
+export function setLang(l) {
+  lang = l === 'en' ? 'en' : 'ko';
+  try { localStorage.setItem('is_lang', lang); } catch {}
+  document.documentElement.lang = lang;
+}
+export function t(key, vars) {
+  let s = (S[lang] && S[lang][key]) ?? S.ko[key] ?? key;
+  if (vars && typeof s === 'string') s = s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] ?? m));
+  return s;
+}

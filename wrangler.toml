@@ -1,0 +1,12 @@
+name = "infographic-studio"
+pages_build_output_dir = "./public"
+compatibility_date = "2026-09-01"
+
+# Projects, jobs, audio and rendered videos live here.
+[[kv_namespaces]]
+binding = "STUDIO_KV"
+id = "0a8a8c8d3edf448fadda0b6b11cf92c3"
+
+# Secrets (set in Cloudflare, never in this file):
+#   APP_PASSWORD, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL,
+#   ELEVENLABS_API_KEY, ROUTINE_FIRE_URL, ROUTINE_TOKEN
