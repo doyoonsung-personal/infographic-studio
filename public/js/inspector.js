@@ -448,10 +448,10 @@ function backgroundSection(body, A) {
     const clipBusy = A.S.busy.clips;
     body.append(h('div', { class: 'row wrap' },
       h('button', { class: 'btn', disabled: clipBusy || !stillOnes.length, onclick: () => A.generateClips(stillOnes).catch(() => {}) },
-        icon('film'), clipBusy ? (A.S.progress.clips || '🎬 …') : t('clip_generate', { n: stillOnes.length })),
+        icon('film'), clipBusy ? (A.S.progress.clips || t('clip_making')) : t('clip_generate', { n: stillOnes.length })),
       h('span', { class: 'hint' }, `≈ $${(stillOnes.reduce((a, k) => a + secsOf(k), 0) * perSec).toFixed(2)} · ${vmodel} 720P`)));
   }
-  const grid = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: '8px' } });
+  const grid = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: '8px' } });
   for (const k of bs.keys) {
     const im = (bg.images || {})[k];
     const scene = p.script.scenes.find((s) => s.id === k);

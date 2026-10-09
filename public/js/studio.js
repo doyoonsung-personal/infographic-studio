@@ -466,13 +466,15 @@ export async function openStudio(root, projectId, app) {
       if (bg.mode !== 'image') throw new Error(t('clip_need_bg'));
       const targets = (keys && keys.length ? keys : Object.keys(im)).filter((k) => im[k] && im[k].blobId);
       if (!targets.length) throw new Error(t('clip_need_bg'));
+      // Progress lives on the style node and inspector, which A.busy('clips') doesn't redraw on its own.
+      const redraw = () => { renderNode('style'); if (S.sel === 'style') renderInsp(); };
       return A.busy('clips', async () => {
         const tl = timeline();
         const lenOf = (k) => k === 'all' ? Math.max(...tl.scenes.map((s) => s.len), 5) : ((tl.scenes.find((s) => s.id === k) || {}).len || 5);
         const prompt = ai.clipPrompt(S.p.style.look, bg.clipNotes);
         let done = 0;
         const errors = [];
-        const show = () => { S.progress.clips = `🎬 ${done}/${targets.length}`; renderNode('style'); if (S.sel === 'style') renderInsp(); };
+        const show = () => { S.progress.clips = `${t('clip_making')} ${done}/${targets.length}`; redraw(); };
         show();
         await Promise.all(targets.map(async (k) => {
           try {
@@ -496,7 +498,7 @@ export async function openStudio(root, projectId, app) {
         }));
         if (errors.length) app.toast(t('clips_failed') + '\n' + errors.join('\n'), 'err');
         return { generated: done, errors };
-      });
+      }).finally(() => setTimeout(redraw, 0));
     },
     removeClip(key) {
       const im = S.p.style.background.images || {};

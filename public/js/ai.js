@@ -157,14 +157,15 @@ export const BG_LOOKS = {
 /* ---------- cut-outs and moving backgrounds (collage look) ---------- */
 
 export const CUTOUT_STYLES = {
-  halftone: 'black-and-white halftone newspaper photograph printed on matte paper',
-  color: 'vintage colour magazine photograph printed on matte paper, slightly faded inks',
-  paper: 'hand-made construction-paper craft illustration, layered coloured paper shapes',
+  halftone: 'A black-and-white (monochrome, greyscale, no colour at all) halftone newspaper photograph printed on matte paper',
+  color: 'A vintage colour magazine photograph printed on matte paper, slightly faded inks',
+  paper: 'A hand-made construction-paper craft illustration made of layered coloured paper shapes',
 };
 
 /** Image prompt for one cut-out: the subject alone, with a white paper border, on flat green for keying. */
 export function cutoutPrompt(subject, style) {
-  return `${String(subject || '').trim()}. ${CUTOUT_STYLES[style] || CUTOUT_STYLES.halftone}, hand-cut out with scissors along its silhouette, ` +
+  // The style goes first so it wins over colours named in the subject.
+  return `${CUTOUT_STYLES[style] || CUTOUT_STYLES.halftone} of: ${String(subject || '').trim()}. The photo is hand-cut out with scissors along its silhouette, ` +
     'with a clean thick white paper border all around the cut edge. One single isolated subject, centered, the whole subject visible with empty margin around it. ' +
     'Placed on a perfectly flat, solid pure green (#00FF00) background, even lighting, no shadow on the background, no other objects. ' +
     'No text, no letters, no numbers, no logos, no watermark.';
@@ -188,9 +189,9 @@ ${scenes.map((s) => JSON.stringify({ id: s.id, title: s.title, onscreen: s.onscr
 
 Rules:
 - 1 to 3 cut-outs per scene (fewer is fine), at most 18 in total. Reuse is not needed; each item is one picture.
-- Each is ONE concrete, photographable subject: an object, a building, a place, a device, a generic person or hands, an animal. No scenes with many parts, no abstract ideas, no charts, no screenshots, no text.
+- Each is ONE concrete, photographable subject that can be cut out along its outline: an object, a device, a vehicle, a single building or landmark, a generic person or hands, an animal, a plant. Never a wide view, a street, a landscape, a room or a crowd; no abstract ideas, charts, screenshots or text.
 - No real, identifiable people and no brand logos or trademarks. Prefer subjects that fit the topic's country and era.
-- "subject": 8 to 25 English words describing it for an image model (what it is, angle, key details).
+- "subject": 8 to 25 English words describing ONLY the subject itself (what it is, angle, key details, colours). Never describe a background, surroundings, ground, setting or lighting: it will be cut out.
 - "name": a 2–6 word label in ${lang}.
 
 Return JSON: {"cutouts":[{"sceneId":"s1","name":"...","subject":"..."}]}`;

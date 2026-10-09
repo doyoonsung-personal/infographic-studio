@@ -62,6 +62,12 @@ If it stalls, the app now says so after 12 min, and I can read the run log for y
   - **그래픽 유지 (Keep graphics):** a `render` job, or a `revise` job when there's a request or the brief/facts/script changed since the version. The worker gets `previous.html` plus a "Changed since vN" list built from that version's job snapshot.
   - **전부 새로 만들기 (Remake all):** a `build` job. It never gets the previous composition, because given one, Claude copied it byte for byte.
   - Each version stores a `contentKey` (`contentKey()` in `public/js/timeline.js`), so the app can show when the content has moved on.
+- **Collage look (Vox-style)**, added 2026-10-09:
+  - **Style → 룩 (look):** sets `style.look = 'collage'` and the paper palette. The stage gets paper texture and moving grain. Claude designs with the collage toolkit (`docs/COMPOSITION.md`) and follows `docs/looks/collage.md`.
+  - **Step 5 컷아웃 (Cut-outs):** Qwen plans subjects per scene, and Qwen-Image draws each one on flat green. `public/js/cutout.js` then keys it out in the browser (flood fill from the border, de-spill) and saves a WebP with alpha. Compositions use `<img data-asset="id">`.
+  - **Moving backgrounds:** any background image can be animated with HappyHorse 1.1 i2v or Wan 2.7 i2v (`server/video.js`, async task + poll; clip stored in KV). The preview gets the video bytes by postMessage. The worker cuts each clip into JPEG frames, and the runtime shows the exact frame for each t (`stageSettle()`).
+  - **Costs** (2026-10-09 catalog): cut-out about $0.03–0.04 each; clip $0.14/s at 720P (HappyHorse), so a 6 s clip is about $0.84.
+  - **Tests:** `test/local-collage.mjs` (free, synthetic). `test/e2e-collage.mjs` and `test/e2e-collage-build.mjs` are paid, live-app end-to-end tests. Test project: p_Su-4X_Z_eBSK.
 - **Fallback:** Claude 빌드 → "고급: 이 PC에서 직접 빌드" creates a manual job and gives you text to paste into Claude Code on this PC.
 - Dev notes: [CLAUDE.md](CLAUDE.md). Design contract for the builder: [docs/COMPOSITION.md](docs/COMPOSITION.md).
 
