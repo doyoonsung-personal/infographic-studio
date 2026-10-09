@@ -44,6 +44,8 @@ If it stalls, the app now says so after 12 min, and I can read the run log for y
 - Fixed 2026-10-09: the app now uses an unrestricted `sk_…` key (the first one was restricted to TTS only, which is why music got a 401).
   Admin → "ElevenLabs에서 불러오기" now lists your 58 account voices.
 - The 9 seeded voices are mostly Voice Library voices; if one fails with "voice not found", add it to My Voices in ElevenLabs.
+- **Emotion/tone tags:** 보이스 → 음성 모델. Choosing Eleven v4 or v3 offers to add tags like `[warmly]`, `[short pause]` to the narration
+  (words and cues stay unchanged; tags are editable in the script). Choosing any other model removes them (restorable via 이전 버전).
 
 ## Spend tonight
 
