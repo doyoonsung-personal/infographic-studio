@@ -175,6 +175,21 @@ const SAFE_HINTS = [
 ];
 export const SAFE_RETRY = 'Keep it neutral: no maps or globes showing Asia, no country borders, no flags, no real currency, no real people, no political or military symbols.';
 
+/**
+ * Rewrite an image subject/prompt that the content filter blocked, keeping the idea but dropping what the
+ * filter refuses (e.g. "100 yuan banknotes" -> generic money, "globe showing Asia" -> Atlantic side).
+ */
+export async function safeSubject(text, opts) {
+  const user = `An image service's content filter refused a picture made from this description:
+"${String(text).slice(0, 1500)}"
+
+The filter refuses: maps or globes that show Asia, China or any country borders; real currency (above all Chinese yuan banknotes, also any banknote with a portrait); national flags; real politicians or leaders; military or political symbols.
+Rewrite the description so it keeps the same idea and role in the infographic but contains none of those (for example a globe turned to the Atlantic Ocean with no borders, a stack of generic fictional banknotes or plain gold coins). Keep the same language, length and style of description.
+Return JSON: {"text":"..."}`;
+  const r = await json([{ role: 'system', content: 'You rewrite image prompts. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, json: true, ...opts });
+  return String(r.text || '').trim() || String(text);
+}
+
 function safeHints(text) {
   return SAFE_HINTS.filter(([re]) => re.test(text)).map(([, hint]) => hint).join(' ');
 }

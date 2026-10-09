@@ -213,16 +213,18 @@ export async function openStudio(root, projectId, app) {
   }
 
   /**
-   * Generate one image. When Model Studio's content filter blocks the picture, try once more with a
-   * neutral-content note; if that is blocked too, explain what the filter refuses.
+   * Generate one image from a description. When Model Studio's content filter blocks the picture, the
+   * description is rewritten without what the filter refuses (maps showing Asia, yuan notes, flags…) and
+   * tried once more. Returns the image plus the description actually used.
    */
-  async function genImage(prompt, ratio) {
+  async function genImage(text, ratio, toPrompt = (x) => x) {
     try {
-      return await api('image', { method: 'POST', body: { prompt, ratio } });
+      return { ...(await api('image', { method: 'POST', body: { prompt: toPrompt(text), ratio } })), text };
     } catch (e) {
       if (!(e.data && e.data.code === 'content_blocked')) throw e;
+      const safer = await ai.safeSubject(text).catch(() => text);
       try {
-        return await api('image', { method: 'POST', body: { prompt: prompt + ' ' + ai.SAFE_RETRY, ratio } });
+        return { ...(await api('image', { method: 'POST', body: { prompt: toPrompt(safer) + ' ' + ai.SAFE_RETRY, ratio } })), text: safer, rewritten: safer !== text };
       } catch (e2) {
         if (e2.data && e2.data.code === 'content_blocked') throw new Error(t('content_blocked'));
         throw e2;
@@ -386,7 +388,7 @@ export async function openStudio(root, projectId, app) {
           const r = await genImage(prompt, S.p.brief.ratio);
           const small = await compressImage(r.blobId).catch(() => null);
           bg.images = bg.images || {};
-          bg.images[k] = { blobId: small || r.blobId, original: r.blobId, prompt, model: r.model, at: Date.now() };
+          bg.images[k] = { blobId: small || r.blobId, original: r.blobId, prompt: r.text, model: r.model, at: Date.now() };
           n++;
           changed({ inspector: S.sel === 'style', preview: true });
         }
@@ -458,7 +460,8 @@ export async function openStudio(root, projectId, app) {
         for (const a of items) {
           progress('assets', `✂ ${n + failed.length + 1}/${items.length}`);
           try {
-            const r = await genImage(ai.cutoutPrompt(a.subject, S.p.assets.style), '1:1');
+            const r = await genImage(a.subject, '1:1', (s) => ai.cutoutPrompt(s, S.p.assets.style));
+            if (r.rewritten) { a.subject = r.text; app.toast(t('content_rewritten', { name: a.name || a.id }), 'ok'); }
             const src = await (await fetch(blobUrl(r.blobId), { credentials: 'same-origin' })).blob();
             const cut = await makeCutout(src);
             if (!cut.blob || cut.coverage < 0.01 || cut.coverage > 0.95) throw new Error(t('cutout_failed'));
