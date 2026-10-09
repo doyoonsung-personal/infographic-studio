@@ -34,9 +34,9 @@ const TOOLS = [
   fn('set_music', 'Music settings: enabled, style_id (one of the music styles), custom prompt, volume 0-1.', { enabled: { type: 'boolean' }, style_id: str(), prompt: str(), volume: { type: 'number' } }),
   fn('generate_music', 'PAID (ElevenLabs credits): generate the music track. Shows a confirm button to the owner.', {}),
   fn('edit_text', 'Change one on-screen text of the current built version instantly (no rebuild). Use the keys listed in the state.', { key: str(), value: str() }, ['key', 'value']),
-  fn('request_build', 'PAID (owner\'s Claude plan): build a brand-new version with Claude. Shows a confirm button.', { instruction: str('extra design direction') }),
-  fn('request_revision', 'PAID (owner\'s Claude plan): ask Claude to change the current version (layout, motion, charts, design). Shows a confirm button.', { instruction: str(), scene_id: str() }, ['instruction']),
-  fn('request_render', 'PAID (owner\'s Claude plan, small): re-render the video with the current text/colour edits. Shows a confirm button.', {}),
+  fn('request_build', 'PAID (owner\'s Claude plan): "Remake all" mode. Claude designs every scene again from scratch, ignoring the current version. Use for: remake/redo/regenerate/re-render everything, new design, start over. Shows a confirm button.', { instruction: str('extra design direction') }),
+  fn('request_revision', 'PAID (owner\'s Claude plan): "Keep graphics" mode with a change. Claude keeps the current design, brings in the latest brief/facts/script, and applies the instruction (layout, motion, charts, a scene\'s design). Shows a confirm button.', { instruction: str(), scene_id: str() }, ['instruction']),
+  fn('request_render', 'PAID (owner\'s Claude plan, small): "Keep graphics" with no design change. Bakes the latest text/colour/background edits and brief/facts/script content into the video with the same design. Shows a confirm button.', {}),
 ];
 
 function fn(name, description, properties, required = []) {
@@ -57,6 +57,7 @@ How to work:
 - Do the smallest set of tool calls that fulfils the request. After write_script, do not call edit_scene unless the owner dictated exact wording.
 - palette_from_website only when the owner gives a website URL. For "brighter/warmer/…" colour requests use set_style with a fitting saved palette_id or custom colors, or suggest_palettes.
 - To change wording on screen after a build, use edit_text (instant). For layout/motion/design changes after a build, use request_revision.
+- New versions come in two modes. "Keep graphics" = request_render (no design change) or request_revision (with a change). "Remake all" = request_build. When the owner asks to redo, regenerate, remake or "re-render everything", or says the graphics barely changed, use request_build, not request_render.
 - Never invent statistics; facts come from research_facts.
 - The current project state is given below and is refreshed every turn.`;
 }
@@ -293,13 +294,15 @@ export function mountChat(root, A) {
         return { ok: true, note: a.key };
       }
       case 'request_build':
-        return confirmCard(t('build_new'), a.instruction || t('build_hint'), () => A.startJob('build', { instruction: a.instruction || '', confirmed: true }));
+        if (!A.currentVersion()) return confirmCard(t('build_new'), a.instruction || t('build_hint'), () => A.startJob('build', { instruction: a.instruction || '', confirmed: true }));
+        return confirmCard(t('mode_remake_go'), a.instruction || t('mode_remake_hint'), () => A.makeVersion('remake', { instruction: a.instruction || '', confirmed: true }));
       case 'request_revision':
         if (!A.currentVersion()) throw new Error('there is no built version yet; use request_build');
-        return confirmCard(t('revise'), `${a.scene_id ? a.scene_id + ': ' : ''}${a.instruction}`, () => A.startJob('revise', { instruction: a.instruction, sceneId: a.scene_id || null, confirmed: true }));
+        return confirmCard(t('mode_keep_go'), `${a.scene_id ? a.scene_id + ': ' : ''}${a.instruction}`, () => A.makeVersion('keep', { instruction: a.instruction, sceneId: a.scene_id || null, confirmed: true }));
       case 'request_render':
         if (!A.currentVersion()) throw new Error('there is no built version yet');
-        return confirmCard(t('rerender'), t('rerender_hint'), () => A.startJob('render', { confirmed: true }));
+        // Keep graphics: a plain re-render, or a content update when the brief/facts/script moved on.
+        return confirmCard(t('mode_keep_go'), t('mode_keep_hint'), () => A.makeVersion('keep', { confirmed: true }));
     }
     throw new Error('unknown tool ' + name);
   }

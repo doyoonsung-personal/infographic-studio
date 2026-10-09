@@ -62,7 +62,9 @@ export async function createJob(env, body, origin) {
   const id = newId('j_');
   const token = randomToken(32);
   const versions = project ? (await getJSON(env, 'versions:' + project.id)) || [] : [];
-  const base = pickBase(versions, project, body.baseVersion);
+  // A build designs from scratch: given the previous composition, Claude tends to copy it.
+  const base = kind === 'revise' || kind === 'render' ? pickBase(versions, project, body.baseVersion) : null;
+  if (kind === 'render' && !base) fail(400, 'nothing to re-render yet: build a version first');
   const now = Date.now();
   const job = {
     id,
@@ -71,6 +73,7 @@ export async function createJob(env, body, origin) {
     title: project ? (project.title || project.brief?.topic || '').slice(0, 120) : 'ping',
     instruction: String(body.instruction || '').slice(0, 4000),
     sceneId: body.sceneId ? String(body.sceneId).slice(0, 40) : null,
+    contentKey: body.contentKey ? String(body.contentKey).slice(0, 40) : null,
     baseVersion: base ? base.v : null,
     status: 'queued',
     stage: 'queued',
@@ -216,7 +219,14 @@ export async function workerBundle(env, job) {
   const composition = snap.baseComposition ? await getBlobText(env, snap.baseComposition) : null;
   const versions = job.projectId ? (await getJSON(env, 'versions:' + job.projectId)) || [] : [];
   const base = versions.find((v) => v.v === job.baseVersion) || null;
-  return { job: publicJob(job), project: snap.project, baseComposition: composition, baseVersion: base };
+  // The content the base version was made from, so the brief can list what changed since.
+  let baseProject = null;
+  if (base && base.jobId) {
+    const bs = await getJSON(env, 'jobsnap:' + base.jobId);
+    const bp = bs && bs.project;
+    if (bp) baseProject = { brief: bp.brief, facts: bp.facts, script: bp.script };
+  }
+  return { job: publicJob(job), project: snap.project, baseComposition: composition, baseVersion: base, baseProject };
 }
 
 export async function workerStatus(env, job, body) {
@@ -266,7 +276,8 @@ export async function workerComplete(env, job, body) {
       notes: job.notes,
       duration: Number(body.duration) || null,
       textsUsed: body.textsUsed && typeof body.textsUsed === 'object' ? body.textsUsed : null,
-      styleKey: String(body.styleKey || '').slice(0, 200),
+      styleKey: String(body.styleKey || '').slice(0, 4000),
+      contentKey: job.contentKey || null,
     };
     versions.push(version);
     await putJSON(env, key, versions.slice(-40));

@@ -176,6 +176,8 @@ async function cmdFetch() {
   writeJSON(path.join(dir, 'project.json'), project);
   const tl = computeTimeline(project);
   writeJSON(path.join(dir, 'timeline.json'), tl);
+  // A build (remake all) designs from scratch, so it never gets the previous composition.
+  if (job.kind === 'build') bundle.baseComposition = null;
   if (bundle.baseComposition) fs.writeFileSync(path.join(dir, 'previous.html'), bundle.baseComposition);
   if (job.kind === 'render') {
     if (!bundle.baseComposition) die('render job has no previous composition');
@@ -208,7 +210,7 @@ async function cmdFetch() {
   }
 
   const briefPath = path.join(dir, 'BRIEF.md');
-  fs.writeFileSync(briefPath, writeBrief({ job, project, timeline: tl, hasPrevious: Boolean(bundle.baseComposition), dir }));
+  fs.writeFileSync(briefPath, writeBrief({ job, project, timeline: tl, hasPrevious: Boolean(bundle.baseComposition), baseProject: bundle.baseProject || null, baseVersion: bundle.baseVersion || null, dir }));
   await status(id, job.kind === 'render' ? 'Re-rendering with your edits' : 'Claude is designing the infographic', 'designing');
 
   console.log(`Fetched job ${id} (${job.kind}).`);
@@ -217,7 +219,8 @@ async function cmdFetch() {
   if (bundle.baseComposition) console.log(`  previous:    ${rel(path.join(dir, 'previous.html'))}`);
   console.log(`  narration:   ${n} clip(s)${m && m.enabled && m.track ? ', music: yes' : ''}${nImages ? `, background images: ${nImages}` : ''}`);
   console.log(`  write to:    ${rel(path.join(dir, 'composition.html'))}`);
-  if (job.kind === 'render') console.log('  (render job: composition.html already copied from the previous version; go straight to check + render)');
+  if (job.kind === 'render') console.log('  (render job: composition.html already copied from the previous version; keep the design, update text only as BRIEF.md says, then check + render)');
+  if (job.kind === 'build') console.log('  (build job: REMAKE ALL from scratch; there is no previous version to copy)');
 }
 
 async function download(id, blobId, file) {
@@ -309,6 +312,21 @@ async function cmdCheck() {
     const info = await page.evaluate(() => window.stageInfo());
     report.duration = info.duration;
     if (info.errors.length) report.errors.push(...info.errors.map((e) => 'runtime: ' + e));
+
+    // Chinese characters the brief never mentions come from Claude's own knowledge (e.g. a product's
+    // Chinese name) or from an old version's text; the owner reads Korean/English.
+    const lang = (ctx.project.brief && ctx.project.brief.language) || 'ko';
+    if (lang === 'ko' || lang === 'en') {
+      const screen = await page.evaluate(() => {
+        const c = document.getElementById('stage').cloneNode(true);
+        c.querySelectorAll('style,script').forEach((e) => e.remove());
+        return c.textContent;
+      });
+      const p = ctx.project;
+      const allowed = JSON.stringify([p.brief, p.facts && p.facts.items, p.script && p.script.scenes, p.edits]);
+      const han = [...new Set(screen.match(/[㐀-鿿豈-﫿]+/g) || [])].filter((w) => !allowed.includes(w));
+      if (han.length) report.errors.push(`on-screen Chinese characters that the brief/script/facts don't contain: ${han.slice(0, 8).join(', ')}. Remove them (on-screen language is ${lang}).`);
+    }
 
     const stillsDir = path.join(ctx.dir, 'stills');
     fs.rmSync(stillsDir, { recursive: true, force: true });

@@ -27,14 +27,23 @@ with the fix it prints, so the owner sees it in the run summary.
 
 **ping**: `node routine/worker.mjs complete --job <job_id> --notes "pong"` and stop.
 
-**render** (owner changed text or colours and wants a new video): `composition.html` is already in place.
-Run `check`, then `render`, then `upload` (steps 4–6). Don't redesign anything.
+The owner picks one of two modes in the app: **Keep graphics** (render / revise jobs) or **Remake all**
+(build jobs).
+
+**render** (keep graphics, nothing to redesign): `composition.html` is already a copy of the current
+version. Read `BRIEF.md`. If its "Changed since" section lists content changes, or `check` reports text
+errors, update only the affected text in `composition.html` (including `#texts` defaults). Never change
+layout or motion. Then run `check`, `render` and `upload` (steps 3–5).
 
 **build** / **revise**:
 
 1. Read `docs/COMPOSITION.md` completely. It is the contract and the design rules.
-2. Read `work/<job_id>/BRIEF.md`. For **revise**, also read `previous.html`, start from a copy of it and
-   change only what the request asks.
+2. Read `work/<job_id>/BRIEF.md`.
+   - **build (remake all):** design from scratch. There is no previous version, so don't go looking for one.
+   - **revise (keep graphics):** also read `previous.html` and start from a copy of it. The brief is the
+     source of truth for content: apply every item in "Changed since", and remove on-screen text that the
+     script, facts or brief don't back up. Then apply the owner's request. If it asks to redo or
+     regenerate everything, give every scene a new layout and new visuals.
 3. Plan before writing: for each scene, its one hero element, the supporting elements, which `data-cue`
    each narration marker drives, and the transition. Keep one visual system across scenes (same margins,
    type scale, icon style, colour roles).
@@ -46,7 +55,8 @@ Run `check`, then `render`, then `upload` (steps 4–6). Don't redesign anything
 node routine/worker.mjs check --job <job_id>
 ```
 
-- Fix every error.
+- Fix every error. That includes on-screen Chinese characters that the brief doesn't contain: remove them,
+  never add them to "explain" a name.
 - **Open and look at** `work/<job_id>/out/contact.jpg` and `out/entries.jpg` with the Read tool. Judge
   each scene: is the hero obvious, is anything clipped/overlapping/too small/off-frame, is a frame
   empty, does it match the style of the other scenes, would the owner be proud to post it?

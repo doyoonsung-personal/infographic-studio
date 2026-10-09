@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseNarration, spokenText, cueTimes, computeTimeline, clipKey, clipFresh, estimateSeconds, stripTags, hasTags } from '../public/js/timeline.js';
+import { parseNarration, spokenText, cueTimes, computeTimeline, clipKey, clipFresh, estimateSeconds, stripTags, hasTags, contentKey } from '../public/js/timeline.js';
+import { writeBrief, contentChanges } from '../routine/lib/brief.mjs';
 import { lintComposition, checkScenes, extractTexts } from '../public/js/lint.js';
 import { assembleDocument, styleKey } from '../public/js/assemble.js';
 
@@ -129,4 +130,35 @@ test('extractTexts and assembleDocument', () => {
 
 test('styleKey is stable regardless of key order', () => {
   assert.equal(styleKey({ colors: { a: '1', b: '2' }, font: 'sans' }), styleKey({ font: 'sans', colors: { b: '2', a: '1' } }));
+});
+
+test('contentKey changes with script/fact content but not with voice tags', () => {
+  const p = { brief: { topic: 'A' }, facts: { items: [{ claim: 'c', value: '1' }] }, script: { scenes: [{ id: 's1', onscreen: 'x', visual: "'Apsara(飞天)' logo", narration: '[warmly] hi {1}there' }] } };
+  const k = contentKey(p);
+  const tagged = structuredClone(p); tagged.script.scenes[0].narration = '[excited] hi {1}there';
+  assert.equal(contentKey(tagged), k);
+  const edited = structuredClone(p); edited.script.scenes[0].visual = "'Apsara' logo";
+  assert.notEqual(contentKey(edited), k);
+  const fact = structuredClone(p); fact.facts.items[0].value = '2';
+  assert.notEqual(contentKey(fact), k);
+});
+
+test('brief: remake-all build has no previous version; keep-graphics revise lists what changed', () => {
+  const base = { brief: { topic: 'A', language: 'ko' }, facts: { items: [{ claim: 'old fact', value: '1' }] }, script: { scenes: [{ id: 's1', onscreen: 'x', visual: "'Apsara(飞天)' logo", narration: 'hi' }] } };
+  const now = structuredClone(base);
+  now.script.scenes[0].visual = "'Apsara' logo";
+  now.facts.items = [{ claim: 'new fact', value: '2' }];
+  const tl = { static: false, width: 1920, height: 1080, duration: 5, fps: 30, scenes: [{ id: 's1', start: 0, end: 5, len: 5, cues: {} }] };
+  const build = writeBrief({ job: { id: 'j1', kind: 'build' }, project: now, timeline: tl, hasPrevious: true, baseProject: base });
+  assert.ok(/REMAKE ALL/.test(build));
+  assert.ok(!build.includes('previous.html'));
+  assert.ok(!build.includes('Changed since'));
+  const rev = writeBrief({ job: { id: 'j2', kind: 'revise', instruction: '모든 장면 다시' }, project: now, timeline: tl, hasPrevious: true, baseProject: base, baseVersion: { v: 5 } });
+  assert.ok(/KEEP GRAPHICS/.test(rev));
+  assert.ok(rev.includes('## Changed since v5'));
+  assert.ok(rev.includes('s1 visual idea'));
+  assert.ok(rev.includes('Fact removed or reworded'));
+  assert.ok(rev.includes('source of truth'));
+  const same = contentChanges(base, structuredClone(base));
+  assert.deepEqual(same, []);
 });

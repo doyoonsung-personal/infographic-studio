@@ -258,11 +258,39 @@ const RENDER = {
     const S = A.S;
     const j = S.job;
     const running = j && ['queued', 'fired', 'running'].includes(j.status);
+    const cur = A.currentVersion();
+    const fail = (e) => A.app.toast(e.message, 'err');
     if (!S.me.configured.routine) body.append(h('div', { class: 'warnbox' }, t('routine_off')));
-    body.append(h('div', { class: 'card' },
-      h('div', { class: 'hint' }, t('build_hint')),
-      h('div', { class: 'row' }, h('span', { class: 'grow' }),
-        h('button', { class: 'btn claude', disabled: running || !S.p.script.scenes.length, onclick: () => A.startJob('build').catch((e) => A.app.toast(e.message, 'err')) }, icon('build'), t('build_new')))));
+    // The request box is shared by the mode panel and the manual-job button below.
+    const instr = h('textarea', { rows: 3 });
+    const sceneSel = h('select', {}, h('option', { value: '' }, t('all_scenes')), S.p.script.scenes.map((s) => h('option', { value: s.id }, `${s.id} ${s.title || ''}`)));
+    if (!cur) {
+      body.append(h('div', { class: 'card' },
+        h('div', { class: 'hint' }, t('build_hint')),
+        h('div', { class: 'row' }, h('span', { class: 'grow' }),
+          h('button', { class: 'btn claude', disabled: running || !S.p.script.scenes.length, onclick: () => A.startJob('build').catch(fail) }, icon('build'), t('build_new')))));
+    } else {
+      if (A.contentStale(cur)) body.append(h('div', { class: 'warnbox' }, t('content_changed', { v: cur.v })));
+      else if (A.versionStale(cur)) body.append(h('div', { class: 'warnbox' }, t('out_of_date')));
+      // Two modes: keep the current graphics (render / revise) or remake every scene from scratch.
+      S.buildMode = S.buildMode === 'remake' ? 'remake' : 'keep';
+      const hint = h('div', { class: 'hint' });
+      const sceneField = field(t('revise_scene'), sceneSel);
+      const go = h('button', { class: 'btn claude', disabled: running || !S.p.script.scenes.length,
+        onclick: () => A.makeVersion(S.buildMode, { instruction: instr.value, sceneId: S.buildMode === 'keep' ? sceneSel.value || null : null }).catch(fail) });
+      const showMode = () => {
+        const keep = S.buildMode === 'keep';
+        hint.textContent = t(keep ? 'mode_keep_hint' : 'mode_remake_hint');
+        instr.placeholder = t(keep ? 'mode_keep_ph' : 'mode_remake_ph');
+        sceneField.style.visibility = keep ? '' : 'hidden';
+        go.replaceChildren(icon(keep ? 'refresh' : 'build'), h('span', {}, t(keep ? 'mode_keep_go' : 'mode_remake_go')));
+      };
+      showMode();
+      body.append(h('div', { class: 'direction' },
+        seg([['keep', t('mode_keep')], ['remake', t('mode_remake')]], S.buildMode, (v) => { S.buildMode = v; showMode(); }),
+        hint, instr,
+        h('div', { class: 'row' }, sceneField, h('span', { class: 'grow' }), go)));
+    }
     if (j) {
       const label = j.status === 'done' ? t('job_done', { v: j.version || '' }) : j.status === 'failed' ? t('job_failed') : j.status === 'cancelled' ? t('job_cancelled_short') : j.status === 'queued' ? t('job_queued') : t('job_running');
       body.append(h('div', { class: 'card' },
@@ -280,26 +308,13 @@ const RENDER = {
       tk ? h('pre', { class: 'mono', style: { whiteSpace: 'pre-wrap', userSelect: 'all', background: '#0c0f15', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px' } },
         t('manual_prompt', { id: tk.id, token: tk.token })) : null,
       h('div', { class: 'row' }, h('span', { class: 'grow' }),
-        h('button', { class: 'btn sm', disabled: running || !S.p.script.scenes.length, onclick: () => A.startJob('build', { manual: true }).catch((e) => A.app.toast(e.message, 'err')) }, icon('build'), t('manual_make')))));
+        h('button', { class: 'btn sm', disabled: running || !S.p.script.scenes.length, onclick: () => A.makeVersion(cur ? S.buildMode : 'remake', { instruction: instr.value, sceneId: cur && S.buildMode === 'keep' ? sceneSel.value || null : null, manual: true }).catch(fail) }, icon('build'), t('manual_make')))));
     if (S.versions.length) {
-      const instr = h('textarea', { placeholder: t('revise_ph') });
-      const sceneSel = h('select', {}, h('option', { value: '' }, t('all_scenes')), S.p.script.scenes.map((s) => h('option', { value: s.id }, `${s.id} ${s.title || ''}`)));
-      body.append(h('div', { class: 'direction' },
-        h('div', { class: 'lbl' }, t('revise')),
-        instr,
-        h('div', { class: 'row' }, field(t('revise_scene'), sceneSel), h('span', { class: 'grow' }),
-          h('button', { class: 'btn claude', disabled: running, onclick: () => { if (!instr.value.trim()) { instr.focus(); return; } A.startJob('revise', { instruction: instr.value.trim(), sceneId: sceneSel.value || null }).catch((e) => A.app.toast(e.message, 'err')); } }, icon('build'), t('revise')))));
-      const cur = A.currentVersion();
-      if (cur && A.versionStale(cur)) {
-        body.append(h('div', { class: 'warnbox' }, t('out_of_date'), h('div', { class: 'row', style: { marginTop: '8px' } },
-          h('span', { class: 'hint grow' }, t('rerender_hint')),
-          h('button', { class: 'btn', disabled: running, onclick: () => A.startJob('render').catch((e) => A.app.toast(e.message, 'err')) }, icon('refresh'), t('rerender')))));
-      }
       body.append(h('div', { class: 'sec' }, t('versions')));
       for (const v of S.versions.slice().reverse()) {
         body.append(h('div', { class: 'ver' + (cur && cur.v === v.v ? ' on' : ''), onclick: () => A.useVersion(v.v) },
           v.files['poster.jpg'] ? h('img', { src: blobUrl(v.files['poster.jpg']), alt: '' }) : h('img', { alt: '' }),
-          h('div', { class: 'vt' }, h('b', {}, `v${v.v}`), ' · ', v.kind, ' · ', fmtDate(v.createdAt),
+          h('div', { class: 'vt' }, h('b', {}, `v${v.v}`), ' · ', t('kind_' + v.kind), ' · ', fmtDate(v.createdAt),
             v.instruction ? h('small', {}, v.instruction) : null,
             v.notes ? h('small', { title: v.notes }, v.notes) : null),
           v.files['contact.jpg'] ? h('a', { class: 'btn xs ghost', href: blobUrl(v.files['contact.jpg']), target: '_blank', onclick: (e) => e.stopPropagation(), title: 'contact sheet' }, icon('preview')) : null));
@@ -324,10 +339,16 @@ const RENDER = {
     if (cur.files['document.pdf']) dl.push(h('a', { class: 'btn', href: blobUrl(cur.files['document.pdf']), download: name('pdf') }, icon('download'), 'PDF'));
     if (cur.files['poster.jpg']) dl.push(h('a', { class: 'btn', href: blobUrl(cur.files['poster.jpg']), download: name('jpg') }, icon('download'), t('poster')));
     body.append(h('div', { class: 'row wrap' }, dl));
-    if (A.versionStale(cur)) {
-      const running = S.job && ['queued', 'fired', 'running'].includes(S.job.status);
+    const running = S.job && ['queued', 'fired', 'running'].includes(S.job.status);
+    const fail = (e) => A.app.toast(e.message, 'err');
+    if (A.contentStale(cur)) {
+      // A re-render can't bring new script/fact content in; offer the two modes instead.
+      body.append(h('div', { class: 'warnbox' }, t('content_changed', { v: cur.v }), h('div', { class: 'row wrap', style: { marginTop: '8px' } }, h('span', { class: 'grow' }),
+        h('button', { class: 'btn', disabled: running, onclick: () => A.makeVersion('keep').catch(fail) }, icon('refresh'), t('mode_keep_go')),
+        h('button', { class: 'btn claude', disabled: running, onclick: () => A.makeVersion('remake').catch(fail) }, icon('build'), t('mode_remake_go')))));
+    } else if (A.versionStale(cur)) {
       body.append(h('div', { class: 'warnbox' }, t('out_of_date'), h('div', { class: 'row', style: { marginTop: '8px' } }, h('span', { class: 'hint grow' }, t('rerender_hint')),
-        h('button', { class: 'btn', disabled: running, onclick: () => A.startJob('render').catch((e) => A.app.toast(e.message, 'err')) }, icon('refresh'), t('rerender')))));
+        h('button', { class: 'btn', disabled: running, onclick: () => A.startJob('render').catch(fail) }, icon('refresh'), t('rerender')))));
     }
     const defs = (S.comp && S.comp.defaults) || {};
     const keys = Object.keys(defs);

@@ -4,7 +4,7 @@
 import { api, blobUrl, blobText, ApiError } from './api.js';
 import { h, icon, debounce, clone, fmtTime, fmtDate, uid } from './util.js';
 import { t, getLang } from './i18n.js';
-import { computeTimeline, spokenText, clipKey, clipFresh, TAG_MODELS, hasTags, stripTags } from './timeline.js';
+import { computeTimeline, spokenText, clipKey, clipFresh, TAG_MODELS, hasTags, stripTags, contentKey } from './timeline.js';
 import { styleKey, FONT_STACKS, backgroundKeys } from './assemble.js';
 import { extractTexts } from './lint.js';
 import * as ai from './ai.js';
@@ -140,9 +140,18 @@ export async function openStudio(root, projectId, app) {
     const textsNow = JSON.stringify(S.p.edits.texts || {});
     const textsThen = JSON.stringify(v.textsUsed || {});
     if (textsNow !== textsThen) return true;
-    if (v.styleKey && v.styleKey !== styleKey(S.p.style)) return true;
+    if (v.styleKey) {
+      // Versions made before 2026-10-09 stored the key cut to 200 characters.
+      const now = styleKey(S.p.style);
+      if (v.styleKey !== now && !(v.styleKey.length === 200 && now.startsWith(v.styleKey))) return true;
+    }
     if (!tl.static && v.duration && Math.abs(v.duration - tl.duration) > 0.05) return true;
     return false;
+  }
+
+  /** Brief, facts or script changed after this version was made (older versions don't know). */
+  function contentStale(v) {
+    return Boolean(v && v.contentKey && v.contentKey !== contentKey(S.p));
   }
 
   function nodeStatus(key) {
@@ -177,7 +186,7 @@ export async function openStudio(root, projectId, app) {
       case 'preview': {
         const v = currentVersion();
         if (!v) return 'empty';
-        return versionStale(v) ? 'stale' : 'done';
+        return versionStale(v) || contentStale(v) ? 'stale' : 'done';
       }
     }
     return 'empty';
@@ -199,7 +208,7 @@ export async function openStudio(root, projectId, app) {
 
   /* ---------- actions (used by inspector + chat) ---------- */
   const A = {
-    S, timeline, voiceDef, voiceStatus, musicStatus, musicTarget, musicPrompt, currentVersion, versionStale, nodeStatus, bgStatus,
+    S, timeline, voiceDef, voiceStatus, musicStatus, musicTarget, musicPrompt, currentVersion, versionStale, contentStale, nodeStatus, bgStatus,
     changed, pushHistory,
     select(key) { S.sel = key; studio.classList.toggle('no-insp', !key); renderCanvas(); renderInsp(); },
 
@@ -507,7 +516,7 @@ export async function openStudio(root, projectId, app) {
         if (!ok) return null;
       }
       const snapshot = { ...clone(S.p), chat: [], history: {} };
-      const job = await api('jobs', { method: 'POST', body: { kind, instruction, sceneId, project: snapshot, manual } });
+      const job = await api('jobs', { method: 'POST', body: { kind, instruction, sceneId, project: snapshot, manual, contentKey: contentKey(S.p) } });
       S.manualTicket = manual ? { id: job.id, token: job.token } : null;
       delete job.token;
       S.job = job;
@@ -517,6 +526,18 @@ export async function openStudio(root, projectId, app) {
       if (job.status === 'failed') app.toast(job.error || t('job_failed'), 'err');
       else pollJob();
       return job;
+    },
+
+    /**
+     * The two ways to make the next version: 'keep' the current graphics (re-render, or revise when
+     * there is a request or the content changed) or 'remake' every scene from scratch.
+     */
+    makeVersion(mode, { instruction = '', sceneId = null, confirmed = false, manual = false } = {}) {
+      const req = String(instruction || '').trim();
+      const cur = currentVersion();
+      if (mode === 'remake' || !cur) return A.startJob('build', { instruction: req, confirmed, manual });
+      if (!req && !contentStale(cur) && cur.contentKey) return A.startJob('render', { confirmed, manual });
+      return A.startJob('revise', { instruction: req || t('keep_apply_content'), sceneId, confirmed, manual });
     },
 
     useVersion(v) {
@@ -720,7 +741,8 @@ export async function openStudio(root, projectId, app) {
         if (v.files['video.mp4']) info.push(h('a', { class: 'btn xs', href: blobUrl(v.files['video.mp4']), download: fileName(p, v, 'mp4'), onclick: (e) => e.stopPropagation() }, icon('download'), 'MP4'));
         if (v.files['image.png']) info.push(h('a', { class: 'btn xs', href: blobUrl(v.files['image.png']), download: fileName(p, v, 'png'), onclick: (e) => e.stopPropagation() }, icon('download'), 'PNG'));
         if (v.files['document.pdf']) info.push(h('a', { class: 'btn xs', href: blobUrl(v.files['document.pdf']), download: fileName(p, v, 'pdf'), onclick: (e) => e.stopPropagation() }, icon('download'), 'PDF'));
-        if (versionStale(v)) info.push(h('span', { class: 'hint' }, t('out_of_date')));
+        if (contentStale(v)) info.push(h('span', { class: 'hint' }, t('content_changed', { v: v.v })));
+        else if (versionStale(v)) info.push(h('span', { class: 'hint' }, t('out_of_date')));
       }
       info.push(h('span', { style: { flex: 1 } }), openBtn);
       el.info.replaceChildren(...info);
@@ -784,9 +806,11 @@ export async function openStudio(root, projectId, app) {
           ? [h('div', { class: 'big' }, (j.log && j.log.length ? j.log[j.log.length - 1].msg : t('job_running'))), h('div', { class: 'line' }, `${j.kind} · ${j.stage}`)]
           : S.versions.length ? [h('div', { class: 'big' }, `v${currentVersion().v} · ${fmtDate(currentVersion().createdAt)}`), h('div', { class: 'line' }, `${S.versions.length} ${t('versions')}`)]
             : [h('div', {}, t('build_hint'))];
+        // Once a version exists the inspector asks which mode (keep graphics / remake all), so no quick button.
         foot = [running
           ? h('button', { class: 'btn sm danger', onclick: async (e) => { e.stopPropagation(); try { await A.cancelJob(); } catch (er) { app.toast(er.message, 'err'); } } }, icon('x'), t('job_cancel'))
-          : h('button', { class: 'btn sm claude', disabled: !p.script.scenes.length, onclick: async (e) => { e.stopPropagation(); try { await A.startJob('build'); } catch (er) { app.toast(er.message, 'err'); } } }, icon('build'), t('build_new')), openBtn];
+          : S.versions.length ? null
+            : h('button', { class: 'btn sm claude', disabled: !p.script.scenes.length, onclick: async (e) => { e.stopPropagation(); try { await A.startJob('build'); } catch (er) { app.toast(er.message, 'err'); } } }, icon('build'), t('build_new')), openBtn];
         break;
       }
     }
@@ -860,7 +884,7 @@ export async function openStudio(root, projectId, app) {
     lines.push(`Background: ${p.style.background.mode === 'image' ? `AI images (${p.style.background.scope}, look=${p.style.background.look}, strength=${p.style.background.strength}), ${bgs.have}/${bgs.keys.length} generated` : 'colours only'}`);
     lines.push(`Voice: ${p.voice.enabled ? `on, voice=${vd ? `${vd.id} (${vd.name})` : 'none'}, speed=${p.voice.speed}, clips ${vs.fresh}/${vs.total} up to date` : 'off'}`);
     lines.push(`Music: ${p.music.enabled ? `on, style=${p.music.styleId}${p.music.prompt ? ' custom prompt' : ''}, volume=${p.music.volume}, track=${musicStatus()}` : 'off'}`);
-    lines.push(`Build: ${S.versions.length} versions${cur ? `, current v${cur.v}${versionStale(cur) ? ' (video out of date with edits)' : ''}` : ''}${S.job ? `, last job ${S.job.kind} ${S.job.status}` : ''}`);
+    lines.push(`Build: ${S.versions.length} versions${cur ? `, current v${cur.v}${contentStale(cur) ? ' (brief/facts/script changed since it was made)' : ''}${versionStale(cur) ? ' (video out of date with edits)' : ''}` : ''}${S.job ? `, last job ${S.job.kind} ${S.job.status}` : ''}`);
     if (S.comp && S.comp.defaults) {
       const keys = Object.entries(S.comp.defaults).slice(0, 50).map(([k, v]) => `${k}=${JSON.stringify((p.edits.texts || {})[k] ?? v)}`);
       lines.push(`Editable on-screen texts of the current version: ${keys.join('; ')}`);

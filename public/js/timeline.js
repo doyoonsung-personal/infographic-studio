@@ -113,6 +113,28 @@ export function clipKey(narration, voiceRef, speed = 1) {
   return (h >>> 0).toString(36);
 }
 
+/**
+ * Fingerprint of everything a composition's content is made from (brief, facts, script words and
+ * visual ideas; not voice tags). A version stores it, so the app can tell when the content moved on.
+ */
+export function contentKey(project) {
+  const p = project || {};
+  const b = p.brief || {};
+  const parts = [
+    [b.topic, b.takeaway, b.audience, b.tone, b.notes, b.language, b.format, b.ratio],
+    ((p.facts && p.facts.items) || []).map((f) => [f.claim, f.value, f.date, f.source]),
+    ((p.script && p.script.scenes) || []).map((s) => [s.id, s.title, s.onscreen, s.visual, stripTags(s.narration || '')]),
+  ];
+  const s = JSON.stringify(parts);
+  let h1 = 2166136261, h2 = 5381;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 16777619);
+    h2 = (Math.imul(h2, 33) + c) | 0;
+  }
+  return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+}
+
 /** Is a narration clip still valid for this scene's text, voice, speed and (if chosen) model? */
 export function clipFresh(clip, narration, voice) {
   if (!clip) return false;

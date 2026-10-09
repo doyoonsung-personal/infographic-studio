@@ -16,23 +16,57 @@ function cell(s, n = 220) {
   return String(s ?? '').replace(/\|/g, '/').replace(/\s*\n\s*/g, ' ⏎ ').slice(0, n);
 }
 
-export function writeBrief({ job, project, timeline: tl, hasPrevious }) {
+/** What changed in brief, facts and script between the version's snapshot and now (lines of markdown). */
+export function contentChanges(base, project) {
+  if (!base) return null;
+  const out = [];
+  const q = (s) => `"${cell(s, 300)}"`;
+  const bb = base.brief || {}, b = project.brief || {};
+  for (const k of ['topic', 'takeaway', 'audience', 'tone', 'notes', 'language', 'ratio']) {
+    if ((bb[k] || '') !== (b[k] || '')) out.push(`- Brief ${k}: was ${q(bb[k] || '')}, now ${q(b[k] || '')}`);
+  }
+  const oldF = (base.facts && base.facts.items) || [], newF = (project.facts && project.facts.items) || [];
+  const fkey = (f) => [f.claim, f.value, f.date, f.source].join('|');
+  const newKeys = new Set(newF.map(fkey)), oldKeys = new Set(oldF.map(fkey));
+  for (const f of oldF) if (!newKeys.has(fkey(f))) out.push(`- Fact removed or reworded (don't show it any more): ${q(f.claim)}${f.value ? ` — ${q(f.value)}` : ''}`);
+  for (const f of newF) if (!oldKeys.has(fkey(f))) out.push(`- Fact added or reworded: ${q(f.claim)}${f.value ? ` — ${q(f.value)}` : ''}`);
+  const oldS = (base.script && base.script.scenes) || [], newS = (project.script && project.script.scenes) || [];
+  const byId = new Map(oldS.map((s) => [s.id, s]));
+  for (const s of newS) {
+    const o = byId.get(s.id);
+    if (!o) { out.push(`- Scene ${s.id} is new`); continue; }
+    byId.delete(s.id);
+    if ((o.title || '') !== (s.title || '')) out.push(`- ${s.id} title: was ${q(o.title)}, now ${q(s.title)}`);
+    if ((o.onscreen || '') !== (s.onscreen || '')) out.push(`- ${s.id} on-screen: was ${q(o.onscreen)}, now ${q(s.onscreen)}`);
+    if ((o.visual || '') !== (s.visual || '')) out.push(`- ${s.id} visual idea: was ${q(o.visual)}, now ${q(s.visual)}`);
+    if (stripTags(o.narration || '') !== stripTags(s.narration || '')) out.push(`- ${s.id} narration: was ${q(stripTags(o.narration || ''))}, now ${q(stripTags(s.narration || ''))}`);
+  }
+  for (const id of byId.keys()) out.push(`- Scene ${id} was removed`);
+  return out;
+}
+
+export function writeBrief({ job, project, timeline: tl, hasPrevious, baseProject, baseVersion }) {
   const b = project.brief || {};
   const st = project.style || {};
   const facts = (project.facts && project.facts.items) || [];
   const scenes = (project.script && project.script.scenes) || [];
   const edits = (project.edits && project.edits.texts) || {};
+  const changes = job.kind === 'build' ? null : contentChanges(baseProject, project);
+  const vName = baseVersion && baseVersion.v ? `v${baseVersion.v}` : 'the previous version';
   const L = [];
 
   L.push(`# Job ${job.id} — ${job.kind.toUpperCase()}`);
   L.push('');
   if (job.kind === 'build') {
-    L.push('Design a brand-new composition for this brief. Follow docs/COMPOSITION.md exactly.');
+    L.push('**REMAKE ALL:** design a brand-new composition for this brief, from scratch. There is no previous version to start from: every scene gets a fresh layout and fresh visuals. Follow docs/COMPOSITION.md exactly.');
   } else if (job.kind === 'revise') {
-    L.push('REVISE the previous version (`previous.html` in this folder). Start from a copy of it and change only what the owner asked for below; keep every other scene, key and timing as it is.');
-    if (job.sceneId) L.push(`Scene in focus: **${job.sceneId}** — leave the other scenes untouched unless the request clearly needs it.`);
+    L.push(`**KEEP GRAPHICS:** revise ${vName} (\`previous.html\` in this folder). Start from a copy of it and keep its design: layouts, visual system and motion.`);
+    L.push('');
+    L.push('- **This brief is the source of truth for content.** Every word and number on screen must come from the script, facts and brief below. Text in `previous.html` that is no longer backed by them (see "Changed since") must be updated or removed. This includes `#texts` defaults and text keys, in every scene, even ones the request doesn\'t mention.');
+    L.push('- Then apply the owner\'s request. If it asks to redo, regenerate or redesign everything, give every scene a new layout and new visuals; don\'t just restyle. Otherwise change only what it asks and keep the rest.');
+    if (job.sceneId) L.push(`- Scene in focus: **${job.sceneId}**. Leave the other scenes' design untouched unless the request clearly needs it (content fixes above still apply everywhere).`);
   } else if (job.kind === 'render') {
-    L.push('RENDER ONLY: `composition.html` is already a copy of the current version. Do not redesign; run check and render, then upload.');
+    L.push(`**KEEP GRAPHICS (re-render):** \`composition.html\` is already a copy of ${vName}. Don't redesign. The only changes allowed are to text, to match "Changed since" below and to fix \`check\` errors. Then check, render and upload.`);
   }
   if (job.instruction) {
     L.push('');
@@ -40,12 +74,19 @@ export function writeBrief({ job, project, timeline: tl, hasPrevious }) {
     L.push('');
     L.push('> ' + String(job.instruction).replace(/\n/g, '\n> '));
   }
+  if (changes) {
+    L.push('');
+    L.push(`## Changed since ${vName} (the owner edited these; the screen must show the new content)`);
+    L.push('');
+    if (changes.length) L.push(...changes.slice(0, 80));
+    else L.push('- Nothing in the brief, facts or script. Still check that every on-screen text is backed by this brief.');
+  }
 
   L.push('');
   L.push('## Format');
   L.push(`- ${tl.static ? 'STATIC infographic (one page, no motion; everything visible at once)' : 'ANIMATED infographic'} — ${b.ratio || '16:9'}: ${RATIO_NOTE[b.ratio] || ''}`);
   L.push(`- Stage: **${tl.width} × ${tl.height} px**${tl.static ? '' : `, ${tl.duration}s at ${tl.fps} fps`}`);
-  L.push(`- On-screen language: **${LANG[b.language] || b.language || 'Korean'}**`);
+  L.push(`- On-screen language: **${LANG[b.language] || b.language || 'Korean'}**. Don't add words in other languages or scripts (e.g. Chinese characters) unless they appear in this brief.`);
   if (project.voice && project.voice.enabled) L.push('- Narration: yes (audio is added after rendering; do not put subtitles on screen unless the owner asked)');
   else if (!tl.static) L.push('- Narration: none — the on-screen text carries the story, so give it enough reading time');
   if (project.music && project.music.enabled) L.push('- Music: yes (added after rendering)');
@@ -123,7 +164,7 @@ export function writeBrief({ job, project, timeline: tl, hasPrevious }) {
   L.push('');
   L.push('## Files');
   L.push('- `timeline.json`, `project.json` — the same data as machine-readable JSON');
-  if (hasPrevious) L.push('- `previous.html` — the current version');
+  if (hasPrevious && job.kind !== 'build') L.push(`- \`previous.html\` — ${vName}`);
   L.push('- write your composition to `composition.html` in this folder');
   L.push('');
   return L.join('\n');
