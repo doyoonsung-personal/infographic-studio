@@ -41,10 +41,9 @@ If it stalls, the app now says so after 12 min, and I can read the run log for y
 
 ## 3. ElevenLabs key
 
-- The key works but lacks **voices_read**, so Admin → "ElevenLabs에서 불러오기" fails. I seeded 9 voices (6 Korean, 3 English) from your
-  workspace via your connector instead. To enable importing, turn on "Voices: Read" for the key (ElevenLabs → Developers → API Keys).
-- Make sure the key allows **Text to Speech** and **Music**. Most seeded voices are Voice Library voices; if one fails with
-  "voice not found", add it to My Voices in ElevenLabs (KKC HQ is already your account voice).
+- Fixed 2026-10-09: the app now uses an unrestricted `sk_…` key (the first one was restricted to TTS only, which is why music got a 401).
+  Admin → "ElevenLabs에서 불러오기" now lists your 58 account voices.
+- The 9 seeded voices are mostly Voice Library voices; if one fails with "voice not found", add it to My Voices in ElevenLabs.
 
 ## Spend tonight
 

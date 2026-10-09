@@ -31,11 +31,18 @@ if (-not $email -or -not $key) { throw 'CLOUDFLARE_EMAIL / CLOUDFLARE_API_KEY ar
 $devVars = Join-Path $PSScriptRoot '..\.dev.vars'
 $password = ((Get-Content $devVars) | Where-Object { $_ -like 'APP_PASSWORD=*' }) -replace '^APP_PASSWORD=', ''
 
+$eleven = Ask-Secret 'ElevenLabs API key (starts with sk_)'
+while ($eleven -and -not $eleven.StartsWith('sk_')) {
+  Write-Host "That is not an ElevenLabs API key (it should start with 'sk_'; the shorter ID shown in the key list will not work)." -ForegroundColor Yellow
+  $eleven = Ask-Secret 'ElevenLabs API key (starts with sk_)'
+}
+if ($eleven) { Write-Host "ElevenLabs key accepted ($($eleven.Length) characters, starts with sk_)." -ForegroundColor Green }
+
 $values = [ordered]@{
   APP_PASSWORD       = $password
   DASHSCOPE_API_KEY  = From-Env 'DASHSCOPE_API_KEY'
   DASHSCOPE_BASE_URL = From-Env 'DASHSCOPE_BASE_URL'
-  ELEVENLABS_API_KEY = Ask-Secret 'ElevenLabs API key'
+  ELEVENLABS_API_KEY = $eleven
   ROUTINE_FIRE_URL   = Ask-Secret 'Routine API trigger URL'
   ROUTINE_TOKEN      = Ask-Secret 'Routine API token'
 }
