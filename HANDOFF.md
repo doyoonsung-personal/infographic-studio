@@ -58,6 +58,10 @@ If it stalls, the app now says so after 12 min, and I can read the run log for y
 - **Build** = the app fires your routine with `{job_id, token}` → the routine runs `routine/worker.mjs`
   (`setup → fetch → design composition → check (lint + contact sheets it looks at) → render → upload`) → new version appears.
 - The **same runtime** (`public/runtime/stage.js`) draws the live preview and the final MP4, so text/colour edits preview instantly; **다시 렌더** bakes them into the file.
+- **Two modes for a new version** (step 7):
+  - **그래픽 유지 (Keep graphics):** a `render` job, or a `revise` job when there's a request or the brief/facts/script changed since the version. The worker gets `previous.html` plus a "Changed since vN" list built from that version's job snapshot.
+  - **전부 새로 만들기 (Remake all):** a `build` job. It never gets the previous composition, because given one, Claude copied it byte for byte.
+  - Each version stores a `contentKey` (`contentKey()` in `public/js/timeline.js`), so the app can show when the content has moved on.
 - **Fallback:** Claude 빌드 → "고급: 이 PC에서 직접 빌드" creates a manual job and gives you text to paste into Claude Code on this PC.
 - Dev notes: [CLAUDE.md](CLAUDE.md). Design contract for the builder: [docs/COMPOSITION.md](docs/COMPOSITION.md).
 
@@ -71,7 +75,8 @@ If it stalls, the app now says so after 12 min, and I can read the run log for y
 
 ## Known limits / ideas for next
 
-- Not verified yet: ElevenLabs TTS/music calls, the cloud routine end to end, Chrome/ffmpeg install inside the cloud session.
+- The cloud routine works end to end as of 2026-10-09 (project p_sVkbiB20ZaJB, v1–v5).
+- `check` fails on on-screen Chinese characters that aren't in the brief/script/facts (ko/en projects).
 - Research takes 2–3 minutes (Qwen searches several times); progress shows in the 팩트 node.
 - KV free plan: files ≤ 25 MB (videos are capped at ~24 MB by the renderer), 1,000 writes/day.
 - Ideas: image generation for scene assets (Qwen-Image), 9:16 re-composition of an existing build, per-scene re-renders.
