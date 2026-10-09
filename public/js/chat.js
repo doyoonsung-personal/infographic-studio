@@ -20,11 +20,15 @@ const TOOLS = [
     font: { type: 'string', enum: ['sans', 'serif', 'display'] }, motion: { type: 'string', enum: ['calm', 'lively'] }, notes: str(),
   }),
   fn('suggest_palettes', 'Generate 3 palette ideas and show them to the owner as clickable swatches.', { direction: str() }),
-  fn('set_background', 'Background style: mode color (palette only) or image (AI background images); scope scene (one per scene) or single (one shared); look photo|illustration|3d|abstract; notes; strength 0.1-0.9 (how visible the images are).', {
+  fn('set_background', 'Background style: mode color (palette only) or image (AI background images); scope scene (one per scene) or single (one shared); look collage|photo|illustration|3d|abstract; notes; strength 0.1-0.9 (how visible the images are).', {
     mode: { type: 'string', enum: ['color', 'image'] }, scope: { type: 'string', enum: ['scene', 'single'] },
-    look: { type: 'string', enum: ['photo', 'illustration', '3d', 'abstract'] }, notes: str(), strength: { type: 'number' },
+    look: { type: 'string', enum: ['collage', 'photo', 'illustration', '3d', 'abstract'] }, notes: str(), strength: { type: 'number' },
   }),
   fn('generate_backgrounds', 'PAID (image credits): generate the background images that are missing (or the given scene ids). Shows a confirm button.', { scene_ids: { type: 'array', items: str() } }),
+  fn('set_look', 'Overall look of the design: "collage" = Vox-style editorial paper collage (paper texture, grain, cut-out photos, torn paper, tape, highlighter, marker; also applies a paper palette), "default" = clean cards and charts. A new look needs a "Remake all" build.', { look: { type: 'string', enum: ['default', 'collage'] } }, ['look']),
+  fn('plan_cutouts', 'Suggest cut-out photos (1-3 concrete subjects per scene) for the Cut-outs step. Free. Keeps cut-outs that already have a picture.', {}),
+  fn('generate_cutouts', 'PAID (image credits, ~$0.04 each): generate the cut-out pictures that are missing. Shows a confirm button.', {}),
+  fn('animate_backgrounds', 'PAID (video credits, ~$0.14 per second, ~5-10 s per image): turn background images into moving AI clips. Optional scene ids (or "all" for the shared image); default = all still images. Shows a confirm button.', { keys: { type: 'array', items: str() } }),
   fn('palette_from_website', 'Build a palette from a brand website\'s colours and apply it. Only when the owner gave a website URL.', { url: str('http(s) URL the owner gave') }, ['url']),
   fn('set_voice', 'Narration settings: enabled, voice_id (one of the available voices), speed 0.7-1.2, model (eleven_v4 / eleven_v3 support emotion tags; switching to them offers the owner to add tags, other models remove tags).', {
     enabled: { type: 'boolean' }, voice_id: str(), speed: { type: 'number' },
@@ -254,6 +258,25 @@ export function mountChat(root, A) {
         const bs = A.bgStatus();
         const ids = a.scene_ids && a.scene_ids.length ? a.scene_ids : (bs.missing.length ? bs.missing : bs.keys);
         return confirmCard(t('bg_generate', { n: ids.length }), ids.join(', '), () => A.generateBackgrounds(ids));
+      }
+      case 'set_look': {
+        A.setLook(a.look);
+        return { ok: true, look: S.p.style.look, palette: S.p.style.paletteName || S.p.style.paletteId };
+      }
+      case 'plan_cutouts': {
+        const r = await A.planAssets();
+        return { ok: true, planned: r ? r.planned : 0, cutouts: S.p.assets.items.map((x) => `${x.sceneId}: ${x.name}`) };
+      }
+      case 'generate_cutouts': {
+        const todo = S.p.assets.items.filter((x) => !x.blobId && x.subject);
+        if (!todo.length) throw new Error('no cut-outs to generate; call plan_cutouts first');
+        return confirmCard(t('assets_generate', { n: todo.length }), todo.map((x) => x.name).join(', '), () => A.generateAssets());
+      }
+      case 'animate_backgrounds': {
+        const im = S.p.style.background.images || {};
+        const keys = (a.keys && a.keys.length ? a.keys : Object.keys(im).filter((k) => im[k] && !im[k].clip)).filter((k) => im[k]);
+        if (!keys.length) throw new Error('no background images to animate; generate backgrounds first');
+        return confirmCard(t('clip_generate', { n: keys.length }), keys.join(', '), () => A.generateClips(keys));
       }
       case 'palette_from_website': {
         const pal = await A.paletteFromSite(a.url);

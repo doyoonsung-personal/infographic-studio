@@ -10,6 +10,7 @@ import * as qwen from './qwen.js';
 import * as eleven from './eleven.js';
 import * as jobs from './jobs.js';
 import * as images from './images.js';
+import * as video from './video.js';
 import { colorsFromUrl } from './palette.js';
 
 const failedLogins = new Map(); // per-isolate brake on password guessing
@@ -73,6 +74,8 @@ export async function handle(context) {
     if (path === 'tts' && method === 'POST') return json(await eleven.tts(env, await readJson(request), await loadConfig(env)));
     if (path === 'music' && method === 'POST') return json(await eleven.music(env, await readJson(request), await loadConfig(env)));
     if (path === 'image' && method === 'POST') return json(await images.generate(env, await readJson(request), await loadConfig(env)));
+    if (path === 'video' && method === 'POST') return json(await video.start(env, await readJson(request), await loadConfig(env)));
+    if (parts[0] === 'video' && parts.length === 2 && method === 'GET') return json(await video.poll(env, parts[1]));
     if (path === 'eleven/voices' && method === 'GET') return json(await eleven.voices(env));
     if (path === 'palette-from-url' && method === 'POST') return json(await colorsFromUrl(await readJson(request)));
 

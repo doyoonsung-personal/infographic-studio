@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseNarration, spokenText, cueTimes, computeTimeline, clipKey, clipFresh, estimateSeconds, stripTags, hasTags, contentKey } from '../public/js/timeline.js';
 import { writeBrief, contentChanges } from '../routine/lib/brief.mjs';
+import { keyPixels } from '../public/js/cutout.js';
 import { lintComposition, checkScenes, extractTexts } from '../public/js/lint.js';
 import { assembleDocument, styleKey } from '../public/js/assemble.js';
 
@@ -161,4 +162,37 @@ test('brief: remake-all build has no previous version; keep-graphics revise list
   assert.ok(rev.includes('source of truth'));
   const same = contentChanges(base, structuredClone(base));
   assert.deepEqual(same, []);
+});
+test('keyPixels removes the border-connected green but keeps green inside the object', () => {
+  const W = 20, H = 20, d = new Uint8ClampedArray(W * H * 4);
+  const put = (x, y, r, g, b) => { const i = (y * W + x) * 4; d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255; };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) put(x, y, 0, 255, 0);
+  for (let y = 5; y < 15; y++) for (let x = 5; x < 15; x++) put(x, y, 255, 255, 255);   // white border
+  for (let y = 7; y < 13; y++) for (let x = 7; x < 13; x++) put(x, y, 40, 60, 160);     // blue picture
+  put(10, 10, 0, 250, 0);                                                                // a green dot inside
+  const { alpha, greenScreen } = keyPixels(d, W, H);
+  assert.ok(greenScreen);
+  assert.equal(alpha[0], 0);
+  assert.equal(alpha[2 * W + 2], 0);
+  assert.equal(alpha[5 * W + 5], 255);
+  assert.equal(alpha[10 * W + 10], 255, 'green inside the object is not background');
+});
+
+test('brief: collage look lists the toolkit, cut-outs and moving backgrounds', () => {
+  const p = {
+    brief: { topic: 'x', language: 'ko' }, facts: { items: [] },
+    script: { scenes: [{ id: 's1', narration: 'hi', onscreen: 'x', visual: 'y' }] },
+    style: { look: 'collage', colors: {}, background: { mode: 'image', scope: 'scene', images: { s1: { blobId: 'b1', clip: { blobId: 'c1', duration: 5 } } } } },
+    assets: { items: [{ id: 'a_1', sceneId: 's1', name: '자전거', subject: 'a bicycle', blobId: 'b2', w: 400, h: 300 }, { id: 'a_2', sceneId: 's1', name: 'x', subject: 'y' }] },
+  };
+  const tl = { static: false, width: 1920, height: 1080, duration: 5, fps: 30, scenes: [{ id: 's1', start: 0, end: 5, len: 5, cues: {} }] };
+  const b = writeBrief({ job: { id: 'j1', kind: 'build' }, project: p, timeline: tl });
+  assert.ok(b.includes('docs/looks/collage.md'));
+  assert.ok(b.includes('| a_1 | s1 |'));
+  assert.ok(!b.includes('| a_2 |'), 'cut-outs without a picture are not offered');
+  assert.ok(b.includes('**Moving backgrounds:** s1'));
+  const base = { brief: p.brief, facts: p.facts, script: p.script, look: 'default', assets: { items: [] } };
+  const ch = contentChanges(base, p);
+  assert.ok(ch.some((l) => l.startsWith('- Look: was "default"')));
+  assert.ok(ch.some((l) => l.startsWith('- Cut-out added: a_1')));
 });

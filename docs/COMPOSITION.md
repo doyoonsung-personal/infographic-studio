@@ -71,6 +71,37 @@ need to do anything for that, but:
   image is also available as `var(--bg-img-<sceneId>)`.
 - Without background images, scenes are plain `var(--bg)`: build richness with shapes, gradients and
   illustrations instead.
+- **Moving backgrounds:** when BRIEF.md lists them, the image layer of those scenes is a short video clip
+  that the stage plays (and, in the renderer, steps frame by frame). Nothing to do; design as for images.
+
+## Cut-out pictures
+
+BRIEF.md lists cut-outs (transparent pictures of single subjects) with ids. Place one with
+`<img data-asset="a_xxxxx" class="c-cutout" alt="">`; the stage fills in the picture. Size it with CSS
+(`width` or `height`, never both, so the aspect ratio holds), position it absolutely, rotate it a little
+with `transform: rotate(-4deg)`, and animate it like any element (`data-a="pop"`, `data-cue`…). The files
+are in `work/<job>/assets/`: open them with the Read tool to see what each one shows.
+
+## Collage toolkit
+
+Classes and attributes for the collage look (always available; BRIEF.md says when the look is collage,
+and `docs/looks/collage.md` explains how to design with them).
+
+| Class / attribute | What it does |
+|---|---|
+| `.c-cutout` | on a cut-out `<img>`: thick white paper border and a soft drop shadow |
+| `.c-paper` | paper-textured surface in `var(--surface)` |
+| `.c-torn` | torn-paper edges (mask); put a `.c-shadow` wrapper around it for a shadow |
+| `.c-shadow` | soft drop shadow that follows the shape (use on wrappers of torn or masked pieces) |
+| `.c-tape` | a strip of masking tape on the top edge |
+| `.c-clipping` | a torn newspaper clipping: serif text on newsprint (wrap in `.c-shadow`) |
+| `.c-label` | a black label strip with bold text in `var(--bg)` (titles, captions) |
+| `.c-halftone` | halftone dot pattern background |
+| `.c-marker` | on SVG shapes: thick red marker stroke (`var(--accent2)`); add `data-draw` to draw it on |
+| `.c-grain` | a film-grain overlay element (the collage look already has one on the whole stage) |
+| `data-hl="0.7"` | highlighter swipe across inline text (`<span data-hl data-cue="1">`), in `var(--accent)`; the value is the sweep duration. The text is visible from the start, only the swipe waits for its time |
+| `data-boil="1.2"` | stop-motion wobble: a new tiny random pose 8 times a second (value = strength in degrees) |
+| `data-drift="-40,10"` | parallax: glides by (x, y) px over the whole scene |
 
 ## Animation attributes
 

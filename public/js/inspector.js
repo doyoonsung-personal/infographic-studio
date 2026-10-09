@@ -156,6 +156,9 @@ const RENDER = {
     const st = A.S.p.style;
     const c = st.colors || {};
     const cr = c.text && c.bg ? contrast(c.text, c.bg) : 21;
+    body.append(h('div', { class: 'sec' }, t('look')));
+    body.append(seg([['default', t('look_default')], ['collage', t('look_collage')]], st.look, (v) => A.setLook(v)));
+    body.append(h('div', { class: 'hint' }, t(st.look === 'collage' ? 'look_collage_hint' : 'look_default_hint')));
     backgroundSection(body, A);
     body.append(h('div', { class: 'sec' }, t('palettes')));
     for (const pal of A.S.config.palettes || []) {
@@ -181,6 +184,46 @@ const RENDER = {
       field(t('font'), seg([['sans', 'Sans'], ['serif', 'Serif'], ['display', 'Display']], st.font, (v) => A.setStyle({ font: v }))),
       field(t('motion'), seg([['calm', t('calm')], ['lively', t('lively')]], st.motion, (v) => A.setStyle({ motion: v })))));
     body.append(field(t('notes'), area(st.notes, (v) => { st.notes = v; A.changed(); }, { rows: 2 })));
+  },
+
+  assets(body, A) {
+    const p = A.S.p;
+    const items = p.assets.items;
+    body.append(h('div', { class: 'hint' }, t(p.style.look === 'collage' ? 'assets_hint' : 'assets_hint_default')));
+    if (p.style.look !== 'collage') {
+      body.append(h('div', { class: 'row' }, h('span', { class: 'grow' }), h('button', { class: 'btn', onclick: () => A.setLook('collage') }, icon('scissors'), t('look_switch'))));
+    }
+    body.append(field(t('cutout_style'), seg([['halftone', t('cut_halftone')], ['color', t('cut_color')], ['paper', t('cut_paper')]], p.assets.style, (v) => A.setAssetStyle(v))));
+    const model = (A.S.config.models && A.S.config.models.image) || 'qwen-image-3.0';
+    const each = { 'z-image-turbo': 0.015, 'qwen-image-max': 0.075 }[model] ?? 0.04;
+    const missing = items.filter((a) => !a.blobId && a.subject);
+    body.append(h('div', { class: 'row wrap' },
+      busyBtn(A, 'assets', items.length ? t('assets_replan') : t('assets_plan'), () => A.planAssets(), 'btn', 'wand'),
+      missing.length ? busyBtn(A, 'assets', t('assets_generate', { n: missing.length }), () => A.generateAssets(), 'btn primary', 'scissors') : null,
+      missing.length ? h('span', { class: 'hint' }, `≈ $${(missing.length * each).toFixed(2)} · ${model}`) : null));
+    const scenes = p.script.scenes;
+    for (const s of scenes) {
+      const mine = items.filter((a) => a.sceneId === s.id);
+      const box = h('div', { class: 'card' }, h('div', { class: 'card-h' }, h('span', { class: 'sid' }, s.id), h('b', { class: 'grow' }, s.title || ''),
+        h('button', { class: 'btn xs ghost', title: t('asset_add'), onclick: () => A.addAsset({ sceneId: s.id }) }, icon('plus'))));
+      if (!mine.length) box.append(h('div', { class: 'hint' }, t('assets_none')));
+      for (const a of mine) {
+        const pic = a.blobId ? h('img', { src: blobUrl(a.blobId), alt: a.name, class: 'cut-thumb' }) : h('div', { class: 'cut-thumb empty' }, a.error ? '!' : '—');
+        box.append(h('div', { class: 'cut-row' },
+          pic,
+          h('div', { class: 'grow', style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 } },
+            h('div', { class: 'row' },
+              h('input', { type: 'text', value: a.name || '', placeholder: t('asset_name'), style: { flex: 1, padding: '4px 8px' }, oninput: (e) => A.updateAsset(a.id, { name: e.target.value, _typing: true }) }),
+              h('code', { class: 'mono', title: t('asset_id_hint'), style: { fontSize: '10.5px', color: 'var(--faint)' } }, a.id)),
+            h('textarea', { rows: 2, placeholder: t('asset_subject'), oninput: (e) => A.updateAsset(a.id, { subject: e.target.value, _typing: true }) }, a.subject || ''),
+            a.error ? h('div', { class: 'err' }, a.error) : null),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+            h('button', { class: 'btn xs icon', title: a.blobId ? t('regen') : t('generate'), disabled: A.S.busy.assets || !a.subject, onclick: () => A.generateAssets([a.id]).catch(() => {}) }, icon(a.blobId ? 'refresh' : 'scissors')),
+            h('button', { class: 'btn xs icon ghost', title: t('remove'), onclick: () => A.removeAsset(a.id) }, icon('trash')))));
+      }
+      body.append(box);
+    }
+    body.append(h('div', { class: 'hint' }, t('assets_footer')));
   },
 
   voice(body, A) {
@@ -380,7 +423,7 @@ function backgroundSection(body, A) {
   const row = h('div', { class: 'row wrap' });
   if (!isStatic) row.append(field(t('bg_scope'), seg([['scene', t('bg_per_scene')], ['single', t('bg_single')]], bg.scope, (v) => A.setBackground({ scope: v }))));
   row.append(field(t('bg_look'), h('select', { onchange: (e) => A.setBackground({ look: e.target.value }) },
-    [['photo', t('bg_photo')], ['illustration', t('bg_illus')], ['3d', t('bg_3d')], ['abstract', t('bg_abstract')]].map(([v, l]) => h('option', { value: v, selected: bg.look === v }, l)))));
+    [['collage', t('bg_collage')], ['photo', t('bg_photo')], ['illustration', t('bg_illus')], ['3d', t('bg_3d')], ['abstract', t('bg_abstract')]].map(([v, l]) => h('option', { value: v, selected: bg.look === v }, l)))));
   body.append(row);
   body.append(field(t('bg_notes'), h('input', { type: 'text', value: bg.notes || '', placeholder: t('bg_notes_ph'), oninput: (e) => A.setBackground({ notes: e.target.value, _typing: true }) })));
   const sv = h('span', { class: 'tag' }, Math.round((bg.strength ?? 0.45) * 100) + '%');
@@ -394,19 +437,40 @@ function backgroundSection(body, A) {
     busyBtn(A, 'style', bs.missing.length ? t('bg_generate', { n: bs.missing.length }) : t('bg_regen_all', { n: bs.keys.length }),
       () => A.generateBackgrounds(bs.missing.length ? bs.missing : null), 'btn primary', 'wand'),
     h('span', { class: 'hint' }, `≈ $${(todo * each).toFixed(2)} · ${model}`)));
+  // Moving backgrounds: each image can be animated into a short AI clip (image-to-video).
+  const animated = !isStatic && bs.keys.length > 0;
+  const stillOnes = bs.keys.filter((k) => (bg.images || {})[k] && !(bg.images[k].clip));
+  const vmodel = (A.S.config.models && A.S.config.models.video) || 'happyhorse-1.1-i2v';
+  const perSec = { 'happyhorse-1.1-i2v': 0.14, 'wan2.7-i2v': 0.1 }[vmodel] ?? 0.14;
+  const tl = A.timeline();
+  const secsOf = (k) => Math.ceil(Math.min(10, k === 'all' ? Math.max(5, ...tl.scenes.map((s) => s.len)) : ((tl.scenes.find((s) => s.id === k) || {}).len || 5)));
+  if (animated) {
+    const clipBusy = A.S.busy.clips;
+    body.append(h('div', { class: 'row wrap' },
+      h('button', { class: 'btn', disabled: clipBusy || !stillOnes.length, onclick: () => A.generateClips(stillOnes).catch(() => {}) },
+        icon('film'), clipBusy ? (A.S.progress.clips || '🎬 …') : t('clip_generate', { n: stillOnes.length })),
+      h('span', { class: 'hint' }, `≈ $${(stillOnes.reduce((a, k) => a + secsOf(k), 0) * perSec).toFixed(2)} · ${vmodel} 720P`)));
+  }
   const grid = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: '8px' } });
   for (const k of bs.keys) {
     const im = (bg.images || {})[k];
     const scene = p.script.scenes.find((s) => s.id === k);
+    const media = im && im.clip
+      ? h('video', { src: blobUrl(im.clip.blobId), muted: true, loop: true, autoplay: true, playsinline: true, title: im.clip.prompt || '', style: { width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: '6px', background: 'var(--panel3)' } })
+      : im ? h('img', { src: blobUrl(im.blobId), alt: '', title: im.prompt || '', style: { width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: '6px', background: 'var(--panel3)' } })
+        : h('div', { style: { aspectRatio: '16/9', borderRadius: '6px', background: 'var(--panel3)', display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: '11px' } }, t('clip_missing'));
+    if (media.tagName === 'VIDEO') media.muted = true;
     grid.append(h('div', { class: 'card', style: { padding: '6px', gap: '6px' } },
-      im ? h('img', { src: blobUrl(im.blobId), alt: '', title: im.prompt || '', style: { width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: '6px', background: 'var(--panel3)' } })
-        : h('div', { style: { aspectRatio: '16/9', borderRadius: '6px', background: 'var(--panel3)', display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: '11px' } }, t('clip_missing')),
+      media,
       h('div', { class: 'row' }, h('span', { class: 'mono grow', style: { fontSize: '11px', color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, k === 'all' ? t('bg_single') : `${k} ${scene && scene.title ? scene.title : ''}`),
+        animated && im ? h('button', { class: 'btn xs icon' + (im.clip ? ' on' : ''), title: im.clip ? t('clip_redo') : t('clip_one'), disabled: A.S.busy.clips, onclick: () => A.generateClips([k]).catch(() => {}) }, icon('film')) : null,
+        im && im.clip ? h('button', { class: 'btn xs icon ghost', title: t('clip_remove'), onclick: () => A.removeClip(k) }, icon('x')) : null,
         h('button', { class: 'btn xs icon', title: t('regen'), disabled: A.S.busy.style, onclick: () => A.generateBackgrounds([k]).catch(() => {}) }, icon('refresh')),
         im ? h('button', { class: 'btn xs icon ghost', title: t('remove'), onclick: () => A.removeBackground(k) }, icon('trash')) : null)));
   }
   body.append(grid);
   body.append(h('div', { class: 'hint' }, t('bg_hint')));
+  if (animated) body.append(h('div', { class: 'hint' }, t('clip_hint')));
 }
 
 function paletteIdea(pal, A) {

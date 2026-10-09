@@ -151,7 +151,64 @@ export const BG_LOOKS = {
   illustration: 'modern flat vector illustration, clean geometric shapes, gentle gradients, subtle paper grain',
   '3d': 'soft 3D clay render, rounded shapes, matte materials, soft studio lighting',
   abstract: 'abstract composition of soft gradients, light leaks and translucent shapes, minimal',
+  collage: 'editorial paper collage in the style of modern explainer videos: layered torn kraft paper and newsprint, halftone-printed photo fragments, strips of masking tape, flat bold colour blocks, tactile paper texture, slightly grainy print look',
 };
+
+/* ---------- cut-outs and moving backgrounds (collage look) ---------- */
+
+export const CUTOUT_STYLES = {
+  halftone: 'black-and-white halftone newspaper photograph printed on matte paper',
+  color: 'vintage colour magazine photograph printed on matte paper, slightly faded inks',
+  paper: 'hand-made construction-paper craft illustration, layered coloured paper shapes',
+};
+
+/** Image prompt for one cut-out: the subject alone, with a white paper border, on flat green for keying. */
+export function cutoutPrompt(subject, style) {
+  return `${String(subject || '').trim()}. ${CUTOUT_STYLES[style] || CUTOUT_STYLES.halftone}, hand-cut out with scissors along its silhouette, ` +
+    'with a clean thick white paper border all around the cut edge. One single isolated subject, centered, the whole subject visible with empty margin around it. ' +
+    'Placed on a perfectly flat, solid pure green (#00FF00) background, even lighting, no shadow on the background, no other objects. ' +
+    'No text, no letters, no numbers, no logos, no watermark.';
+}
+
+/**
+ * Plan the cut-outs a collage needs: 1–3 concrete subjects per scene (objects, places, generic people).
+ * Returns [{sceneId, name, subject}] where name is a short label in the project language and subject is English.
+ */
+export async function planCutouts(p, opts) {
+  const b = p.brief || {};
+  const scenes = (p.script && p.script.scenes) || [];
+  const lang = b.language === 'en' ? 'English' : 'Korean';
+  const user = `We are making an editorial paper-collage infographic video (the look of modern explainer videos: cut-out photos with white borders, torn paper, tape, highlighter).
+Plan the CUT-OUT pictures the designer will place in each scene. Text, numbers and charts are drawn separately, so cut-outs are only pictures.
+
+Topic: ${b.topic || ''}
+Takeaway: ${b.takeaway || ''}
+Scenes:
+${scenes.map((s) => JSON.stringify({ id: s.id, title: s.title, onscreen: s.onscreen, visual: s.visual })).join('\n')}
+
+Rules:
+- 1 to 3 cut-outs per scene (fewer is fine), at most 18 in total. Reuse is not needed; each item is one picture.
+- Each is ONE concrete, photographable subject: an object, a building, a place, a device, a generic person or hands, an animal. No scenes with many parts, no abstract ideas, no charts, no screenshots, no text.
+- No real, identifiable people and no brand logos or trademarks. Prefer subjects that fit the topic's country and era.
+- "subject": 8 to 25 English words describing it for an image model (what it is, angle, key details).
+- "name": a 2–6 word label in ${lang}.
+
+Return JSON: {"cutouts":[{"sceneId":"s1","name":"...","subject":"..."}]}`;
+  const r = await json([{ role: 'system', content: 'You are the art director of a collage explainer video. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, json: true, ...opts });
+  const ids = new Set(scenes.map((s) => s.id));
+  return (r.cutouts || [])
+    .filter((x) => x && ids.has(String(x.sceneId)) && x.subject)
+    .slice(0, 18)
+    .map((x) => ({ sceneId: String(x.sceneId), name: String(x.name || x.subject).slice(0, 60), subject: String(x.subject).slice(0, 400) }));
+}
+
+/** Motion prompt for animating a background image into a short clip (image-to-video). */
+export function clipPrompt(look, notes) {
+  const base = look === 'collage'
+    ? 'Living paper collage: the paper layers drift gently with subtle parallax, a few cut-out pieces and paper scraps flutter slightly, slow steady camera push-in. Keep the composition, colours and paper-collage style exactly.'
+    : 'Subtle cinematic motion: slow steady camera push-in with gentle parallax between foreground and background, soft natural movement in the scene. Keep the composition, colours and style exactly.';
+  return `${base}${notes ? ' ' + String(notes).trim() : ''} No new objects, no people appearing, no text, no logos, no flicker, no morphing.`;
+}
 
 /**
  * Write one image prompt per key ('all' = one shared image, else a scene id).

@@ -125,6 +125,10 @@ export function contentKey(project) {
     ((p.facts && p.facts.items) || []).map((f) => [f.claim, f.value, f.date, f.source]),
     ((p.script && p.script.scenes) || []).map((s) => [s.id, s.title, s.onscreen, s.visual, stripTags(s.narration || '')]),
   ];
+  // The look and the set of cut-outs are design inputs too (a re-render can't place new cut-outs).
+  if (p.style && p.style.look && p.style.look !== 'default') parts.push(['look', p.style.look]);
+  const cut = ((p.assets && p.assets.items) || []).filter((a) => a.blobId);
+  if (cut.length) parts.push(cut.map((a) => [a.id, a.sceneId, a.name]));
   const s = JSON.stringify(parts);
   let h1 = 2166136261, h2 = 5381;
   for (let i = 0; i < s.length; i++) {

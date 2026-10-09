@@ -209,6 +209,33 @@ async function cmdFetch() {
     }
   }
 
+  // Cut-out pictures (transparent WebP/PNG), saved with a real extension so Chrome and the Read tool open them.
+  const cuts = ((project.assets && project.assets.items) || []).filter((a) => a.blobId && /^[\w-]+$/.test(a.id));
+  if (cuts.length) {
+    fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
+    for (const a of cuts) {
+      const tmp = path.join(dir, 'assets', a.id + '.tmp');
+      await download(id, a.blobId, tmp);
+      fs.renameSync(tmp, path.join(dir, 'assets', a.id + imageExt(fs.readFileSync(tmp))));
+    }
+  }
+
+  // Moving backgrounds: each clip becomes numbered JPEG frames at the stage size and fps, so every
+  // rendered frame shows exactly the right clip frame.
+  let nClips = 0;
+  if (bg.mode === 'image' && !tl.static) {
+    for (const [key, im] of Object.entries(bg.images || {})) {
+      if (!im || !im.clip || !im.clip.blobId || !/^[\w-]+$/.test(key)) continue;
+      const cdir = path.join(dir, 'clips', key);
+      fs.rmSync(cdir, { recursive: true, force: true });
+      fs.mkdirSync(cdir, { recursive: true });
+      const mp4 = path.join(dir, 'clips', key + '.mp4');
+      await download(id, im.clip.blobId, mp4);
+      await ffmpeg(['-y', '-i', mp4, '-an', '-vf', `fps=${tl.fps || FPS},scale=${tl.width}:${tl.height}:force_original_aspect_ratio=increase:flags=lanczos,crop=${tl.width}:${tl.height}`, '-q:v', '3', path.join(cdir, '%05d.jpg')]);
+      nClips++;
+    }
+  }
+
   const briefPath = path.join(dir, 'BRIEF.md');
   fs.writeFileSync(briefPath, writeBrief({ job, project, timeline: tl, hasPrevious: Boolean(bundle.baseComposition), baseProject: bundle.baseProject || null, baseVersion: bundle.baseVersion || null, dir }));
   await status(id, job.kind === 'render' ? 'Re-rendering with your edits' : 'Claude is designing the infographic', 'designing');
@@ -217,7 +244,8 @@ async function cmdFetch() {
   console.log(`  brief:       ${rel(briefPath)}`);
   console.log(`  timeline:    ${rel(path.join(dir, 'timeline.json'))}  (${tl.scenes.length} scenes, ${tl.duration}s, ${tl.width}x${tl.height}${tl.static ? ', static' : ''})`);
   if (bundle.baseComposition) console.log(`  previous:    ${rel(path.join(dir, 'previous.html'))}`);
-  console.log(`  narration:   ${n} clip(s)${m && m.enabled && m.track ? ', music: yes' : ''}${nImages ? `, background images: ${nImages}` : ''}`);
+  console.log(`  narration:   ${n} clip(s)${m && m.enabled && m.track ? ', music: yes' : ''}${nImages ? `, background images: ${nImages}` : ''}${nClips ? `, moving backgrounds: ${nClips}` : ''}`);
+  if (cuts.length) console.log(`  cut-outs:    ${cuts.length} in ${rel(path.join(dir, 'assets'))} (open them with the Read tool to see what they show)`);
   console.log(`  write to:    ${rel(path.join(dir, 'composition.html'))}`);
   if (job.kind === 'render') console.log('  (render job: composition.html already copied from the previous version; keep the design, update text only as BRIEF.md says, then check + render)');
   if (job.kind === 'build') console.log('  (build job: REMAKE ALL from scratch; there is no previous version to copy)');
@@ -254,7 +282,43 @@ function docFor(ctx) {
     texts: (ctx.project.edits && ctx.project.edits.texts) || {},
     images: bg.mode === 'image' ? backgroundImages(ctx.dir) : {},
     bgStrength: bg.strength,
+    look: st.look,
+    assets: assetFiles(ctx.dir),
+    clips: bg.mode === 'image' ? clipFrames(ctx.dir, ctx.timeline) : {},
   });
+}
+
+function imageExt(buf) {
+  if (buf[0] === 0x89 && buf[1] === 0x50) return '.png';
+  if (buf[0] === 0x52 && buf[8] === 0x57) return '.webp';
+  return '.jpg';
+}
+
+/** work/<job>/assets/<id>.<ext> -> {id: 'assets/<file>'} (relative to render.html). */
+function assetFiles(dir) {
+  const d = path.join(dir, 'assets');
+  const out = {};
+  if (!fs.existsSync(d)) return out;
+  for (const f of fs.readdirSync(d)) {
+    const m = /^([\w-]+)\.(png|webp|jpg)$/.exec(f);
+    if (m) out[m[1]] = 'assets/' + f;
+  }
+  return out;
+}
+
+/** work/<job>/clips/<key>/00001.jpg… -> {key: {frames: 'clips/<key>/', n, fps, dur}}. */
+function clipFrames(dir, tl) {
+  const d = path.join(dir, 'clips');
+  const out = {};
+  if (!fs.existsSync(d)) return out;
+  const fps = tl.fps || FPS;
+  for (const key of fs.readdirSync(d)) {
+    const cdir = path.join(d, key);
+    if (!/^[\w-]+$/.test(key) || !fs.statSync(cdir).isDirectory()) continue;
+    const n = fs.readdirSync(cdir).filter((f) => /^\d{5}\.jpg$/.test(f)).length;
+    if (n) out[key] = { frames: `clips/${key}/`, n, fps, dur: +(n / fps).toFixed(3) };
+  }
+  return out;
 }
 
 /** work/<job>/images/<key>.img -> {key: data URI} (JPEG or PNG, sniffed from the bytes). */
@@ -287,7 +351,8 @@ async function openStage(ctx, browser) {
 }
 
 async function shot(page, t, type = 'jpeg') {
-  await page.evaluate((x) => window.seek(x), t);
+  // Moving backgrounds swap in a new frame image per seek; wait until it has decoded.
+  await page.evaluate(async (x) => { window.seek(x); if (window.stageSettle) await window.stageSettle(); }, t);
   return page.screenshot(type === 'png' ? { type: 'png' } : { type: 'jpeg', quality: 90 });
 }
 
@@ -565,7 +630,7 @@ async function cmdUpload() {
     notes,
     duration: ctx.timeline.duration,
     textsUsed: (ctx.project.edits && ctx.project.edits.texts) || {},
-    styleKey: styleKey(st),
+    styleKey: styleKey(st, ctx.project.assets),
     report: report ? { ok: report.ok, errors: report.errors.slice(0, 10), warnings: report.warnings.slice(0, 20) } : null,
   });
   console.log(`Done. Version v${res.version ? res.version.v : '?'} is in the app.`);

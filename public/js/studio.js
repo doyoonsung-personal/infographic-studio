@@ -11,17 +11,22 @@ import * as ai from './ai.js';
 import { Player } from './player.js';
 import { renderInspector } from './inspector.js';
 import { mountChat } from './chat.js';
+import { makeCutout } from './cutout.js';
 
 export const NODES = [
   { key: 'brief', icon: 'brief' },
   { key: 'facts', icon: 'facts' },
   { key: 'script', icon: 'script' },
   { key: 'style', icon: 'style' },
+  { key: 'assets', icon: 'scissors' },
   { key: 'voice', icon: 'voice' },
   { key: 'music', icon: 'music' },
   { key: 'build', icon: 'build' },
   { key: 'preview', icon: 'preview', wide: true },
 ];
+
+// The collage look's paper palette: warm paper, ink, highlighter yellow, marker red, print blue.
+const COLLAGE_PALETTE = { id: 'collage-paper', name: 'Collage Paper', colors: { bg: '#efe7d8', surface: '#fbf6ec', text: '#1c1a17', muted: '#6e665b', accent: '#f6c915', accent2: '#e2422e', accent3: '#2f6db5' } };
 
 export function normalize(p, config) {
   const d = config.defaults || {};
@@ -31,6 +36,8 @@ export function normalize(p, config) {
   p.script = { scenes: [], ...(p.script || {}) };
   p.style = { paletteId: pal ? pal.id : null, colors: pal ? clone(pal.colors) : null, font: 'sans', motion: 'lively', notes: '', ...(p.style || {}) };
   p.style.background = { mode: 'color', scope: 'scene', look: 'photo', notes: '', strength: 0.45, images: {}, ...(p.style.background || {}) };
+  p.style.look = p.style.look === 'collage' ? 'collage' : 'default';
+  p.assets = { style: 'halftone', items: [], ...(p.assets || {}) };
   const firstVoice = (config.voices || []).find((v) => !v.language || v.language === p.brief.language) || (config.voices || [])[0];
   p.voice = { enabled: Boolean(firstVoice) && p.brief.format !== 'static', voiceRef: firstVoice ? firstVoice.id : null, speed: 1, clips: {}, ...(p.voice || {}) };
   const ms = (config.musicStyles || [])[0];
@@ -142,7 +149,7 @@ export async function openStudio(root, projectId, app) {
     if (textsNow !== textsThen) return true;
     if (v.styleKey) {
       // Versions made before 2026-10-09 stored the key cut to 200 characters.
-      const now = styleKey(S.p.style);
+      const now = styleKey(S.p.style, S.p.assets);
       if (v.styleKey !== now && !(v.styleKey.length === 200 && now.startsWith(v.styleKey))) return true;
     }
     if (!tl.static && v.duration && Math.abs(v.duration - tl.duration) > 0.05) return true;
@@ -165,6 +172,12 @@ export async function openStudio(root, projectId, app) {
         if (!p.style.colors) return 'empty';
         const bs = bgStatus();
         return bs.missing.length && bs.keys.length ? 'stale' : 'done';
+      }
+      case 'assets': {
+        const items = p.assets.items;
+        if (!items.length) return p.style.look === 'collage' ? 'empty' : 'off';
+        const made = items.filter((a) => a.blobId).length;
+        return made === items.length ? 'done' : made ? 'stale' : 'ready';
       }
       case 'voice': {
         if (!p.voice.enabled || p.brief.format === 'static') return 'off';
@@ -366,6 +379,129 @@ export async function openStudio(root, projectId, app) {
     removeBackground(key) {
       if (S.p.style.background.images) delete S.p.style.background.images[key];
       changed({ inspector: true, preview: true });
+    },
+
+    /** 'default' or 'collage' (Vox-style paper collage). Switching to collage brings its paper palette. */
+    setLook(look) {
+      const st = S.p.style;
+      const next = look === 'collage' ? 'collage' : 'default';
+      if (st.look === next) return;
+      pushHistory('style', st);
+      st.look = next;
+      if (next === 'collage') {
+        st.colors = clone(COLLAGE_PALETTE.colors);
+        st.paletteId = COLLAGE_PALETTE.id;
+        st.paletteName = COLLAGE_PALETTE.name;
+        if (st.background.look !== 'collage') st.background.look = 'collage';
+      }
+      changed({ inspector: S.sel === 'style' || S.sel === 'assets', preview: true });
+      A.applyLive();
+    },
+
+    /** Ask the writer model which cut-outs each scene needs; keeps cut-outs that already have a picture. */
+    async planAssets() {
+      if (!S.p.script.scenes.length) throw new Error(t('assets_need_script'));
+      return A.busy('assets', async () => {
+        const plan = await ai.planCutouts(S.p);
+        const kept = S.p.assets.items.filter((a) => a.blobId);
+        S.p.assets.items = [...kept, ...plan.map((x) => ({ id: uid('a_'), ...x }))];
+        changed({ inspector: S.sel === 'assets' });
+        return { planned: plan.length };
+      });
+    },
+    addAsset(fields) {
+      const a = { id: uid('a_'), sceneId: fields.sceneId || (S.p.script.scenes[0] || {}).id || 's1', name: fields.name || '', subject: fields.subject || '' };
+      S.p.assets.items.push(a);
+      changed({ inspector: S.sel === 'assets' });
+      return a;
+    },
+    updateAsset(id, patch) {
+      const a = S.p.assets.items.find((x) => x.id === id);
+      if (!a) return;
+      for (const k of ['sceneId', 'name', 'subject']) if (patch[k] !== undefined) a[k] = String(patch[k]);
+      changed({ inspector: S.sel === 'assets' && !patch._typing });
+    },
+    removeAsset(id) {
+      S.p.assets.items = S.p.assets.items.filter((x) => x.id !== id);
+      changed({ inspector: S.sel === 'assets', preview: true });
+    },
+    setAssetStyle(style) {
+      S.p.assets.style = ai.CUTOUT_STYLES[style] ? style : 'halftone';
+      changed({ inspector: S.sel === 'assets' });
+    },
+
+    /** Generate cut-out pictures (paid: one image each), remove their green background, store them. */
+    async generateAssets(ids) {
+      const items = S.p.assets.items.filter((a) => a.subject && (ids && ids.length ? ids.includes(a.id) : !a.blobId));
+      if (!items.length) return { generated: 0 };
+      return A.busy('assets', async () => {
+        let n = 0;
+        const failed = [];
+        for (const a of items) {
+          progress('assets', `✂ ${n + failed.length + 1}/${items.length}`);
+          try {
+            const r = await api('image', { method: 'POST', body: { prompt: ai.cutoutPrompt(a.subject, S.p.assets.style), ratio: '1:1' } });
+            const src = await (await fetch(blobUrl(r.blobId), { credentials: 'same-origin' })).blob();
+            const cut = await makeCutout(src);
+            if (!cut.blob || cut.coverage < 0.01 || cut.coverage > 0.95) throw new Error(t('cutout_failed'));
+            const up = await api('blobs', { method: 'POST', raw: true, body: cut.blob, headers: { 'content-type': cut.blob.type, 'x-file-name': a.id + (cut.blob.type === 'image/webp' ? '.webp' : '.png') } });
+            Object.assign(a, { blobId: up.blobId, source: r.blobId, w: cut.width, h: cut.height, style: S.p.assets.style, at: Date.now() });
+            delete a.error;
+            n++;
+          } catch (e) {
+            a.error = String(e.message || e).slice(0, 200);
+            failed.push(a.name || a.id);
+          }
+          changed({ inspector: S.sel === 'assets', preview: true });
+        }
+        if (failed.length) app.toast(t('cutouts_failed', { n: failed.length }) + ': ' + failed.join(', '), 'err');
+        return { generated: n, failed: failed.length };
+      });
+    },
+
+    /** Animate background images into short clips (paid: image-to-video, a few seconds each). */
+    async generateClips(keys) {
+      const bg = S.p.style.background;
+      const im = bg.images || {};
+      if (bg.mode !== 'image') throw new Error(t('clip_need_bg'));
+      const targets = (keys && keys.length ? keys : Object.keys(im)).filter((k) => im[k] && im[k].blobId);
+      if (!targets.length) throw new Error(t('clip_need_bg'));
+      return A.busy('clips', async () => {
+        const tl = timeline();
+        const lenOf = (k) => k === 'all' ? Math.max(...tl.scenes.map((s) => s.len), 5) : ((tl.scenes.find((s) => s.id === k) || {}).len || 5);
+        const prompt = ai.clipPrompt(S.p.style.look, bg.clipNotes);
+        let done = 0;
+        const errors = [];
+        const show = () => { S.progress.clips = `🎬 ${done}/${targets.length}`; renderNode('style'); if (S.sel === 'style') renderInsp(); };
+        show();
+        await Promise.all(targets.map(async (k) => {
+          try {
+            const s = await api('video', { method: 'POST', body: { imageBlobId: im[k].blobId, prompt, duration: Math.ceil(Math.min(lenOf(k), 10)) } });
+            for (let i = 0; i < 160; i++) {   // up to ~13 minutes
+              await new Promise((r) => setTimeout(r, 5000));
+              const r = await api('video/' + s.taskId);
+              if (r.status === 'SUCCEEDED') {
+                if (im[k]) im[k].clip = { blobId: r.blobId, model: s.model, duration: s.duration, prompt, at: Date.now() };
+                done++;
+                show();
+                changed({ inspector: S.sel === 'style', preview: true });
+                return;
+              }
+              if (r.status === 'FAILED') throw new Error(r.error || 'failed');
+            }
+            throw new Error('timed out');
+          } catch (e) {
+            errors.push(`${k}: ${e.message || e}`);
+          }
+        }));
+        if (errors.length) app.toast(t('clips_failed') + '\n' + errors.join('\n'), 'err');
+        return { generated: done, errors };
+      });
+    },
+    removeClip(key) {
+      const im = S.p.style.background.images || {};
+      if (im[key]) delete im[key].clip;
+      changed({ inspector: S.sel === 'style', preview: true });
     },
 
     setVoice(patch) {
@@ -645,8 +781,8 @@ export async function openStudio(root, projectId, app) {
   const bgData = new Map();
   async function ensureBgData() {
     const bg = S.p.style.background;
-    if (bg.mode !== 'image') return;
-    const ids = Object.values(bg.images || {}).map((x) => x && x.blobId).filter((id) => id && !bgData.has(id));
+    const ids = S.p.assets.items.map((a) => a.blobId).filter((id) => id && !bgData.has(id));
+    if (bg.mode === 'image') ids.push(...Object.values(bg.images || {}).map((x) => x && x.blobId).filter((id) => id && !bgData.has(id)));
     await Promise.all(ids.map(async (id) => {
       try {
         const blob = await (await fetch(blobUrl(id), { credentials: 'same-origin' })).blob();
@@ -662,14 +798,40 @@ export async function openStudio(root, projectId, app) {
     return out;
   }
 
+  function assetsForPreview() {
+    const out = {};
+    for (const a of S.p.assets.items) if (a.blobId && bgData.has(a.blobId)) out[a.id] = bgData.get(a.blobId);
+    return out;
+  }
+
+  // Clip videos go in as bytes after the stage loads (fetched once per clip, shared by both players).
+  const clipBytes = new Map();
+  function clipsForPreview() {
+    const bg = S.p.style.background;
+    const clips = {}, bytes = {};
+    if (bg.mode !== 'image' || timeline().static) return { clips, bytes };
+    for (const [k, v] of Object.entries(bg.images || {})) {
+      const c = v && v.clip;
+      if (!c || !c.blobId) continue;
+      if (!clipBytes.has(c.blobId)) {
+        clipBytes.set(c.blobId, fetch(blobUrl(c.blobId), { credentials: 'same-origin' }).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null));
+      }
+      clips[k] = { dur: c.duration || 5 };
+      bytes[k] = clipBytes.get(c.blobId);
+    }
+    return { clips, bytes };
+  }
+
   function playerOpts() {
     const tl = timeline();
     const voices = tl.scenes.filter((s) => s.voice).map((s) => ({ url: blobUrl(s.voice.blobId), at: s.voice.at, dur: s.voice.dur }));
     const m = S.p.music;
     const music = m.enabled && m.track && !tl.static ? { url: blobUrl(m.track.blobId), volume: m.volume } : null;
+    const cl = clipsForPreview();
     return {
       fragment: S.comp.fragment, timeline: tl, colors: S.p.style.colors, font: fontStack(S.p.style.font), texts: S.p.edits.texts || {},
       images: bgImagesForPreview(), bgStrength: S.p.style.background.strength, voices, music,
+      look: S.p.style.look, assets: assetsForPreview(), clips: cl.clips, clipBytes: cl.bytes,
     };
   }
 
@@ -776,9 +938,23 @@ export async function openStudio(root, projectId, app) {
         const c = p.style.colors || {};
         body = [h('div', { class: 'mini-swatch' }, ['bg', 'surface', 'text', 'accent', 'accent2', 'accent3'].map((k) => h('i', { style: { background: c[k] || '#333' } }))),
           h('div', { class: 'line' }, [p.style.paletteName || (S.config.palettes.find((x) => x.id === p.style.paletteId) || {}).name || 'Custom', p.style.font, t(p.style.motion || 'lively')].join(' · ')),
-          h('div', { class: 'line' }, p.style.background.mode === 'image' ? `${t('bg_title')}: ${t('bg_image')} ${bgStatus().have}/${bgStatus().keys.length}` : `${t('bg_title')}: ${t('bg_color')}`)];
+          h('div', { class: 'line' }, p.style.background.mode === 'image' ? `${t('bg_title')}: ${t('bg_image')} ${bgStatus().have}/${bgStatus().keys.length}` : `${t('bg_title')}: ${t('bg_color')}`),
+          p.style.look === 'collage' ? h('div', { class: 'line' }, t('look') + ': ' + t('look_collage')) : null,
+          S.busy.clips ? h('div', { class: 'line mono' }, S.progress.clips || '🎬 …') : null];
         foot = [p.style.background.mode === 'image' && bgStatus().missing.length
           ? regen(t('bg_generate', { n: bgStatus().missing.length }), () => A.generateBackgrounds(bgStatus().missing)) : null, openBtn];
+        break;
+      }
+      case 'assets': {
+        const items = p.assets.items;
+        const made = items.filter((a) => a.blobId);
+        body = items.length
+          ? [h('div', { class: 'cut-strip' }, made.slice(0, 8).map((a) => h('img', { src: blobUrl(a.blobId), alt: a.name, title: a.name }))),
+            h('div', { class: 'line' }, t('assets_count', { made: made.length, n: items.length }))]
+          : [h('div', {}, p.style.look === 'collage' ? t('assets_empty') : t('assets_off'))];
+        foot = [items.length && made.length < items.length
+          ? regen(t('assets_generate', { n: items.length - made.length }), () => A.generateAssets())
+          : regen(t('assets_plan'), () => A.planAssets(), !p.script.scenes.length), openBtn];
         break;
       }
       case 'voice': {
@@ -882,6 +1058,11 @@ export async function openStudio(root, projectId, app) {
     lines.push(`Style: palette=${p.style.paletteName || p.style.paletteId || 'custom'} colors=${JSON.stringify(p.style.colors)} font=${p.style.font} motion=${p.style.motion}`);
     const bgs = bgStatus();
     lines.push(`Background: ${p.style.background.mode === 'image' ? `AI images (${p.style.background.scope}, look=${p.style.background.look}, strength=${p.style.background.strength}), ${bgs.have}/${bgs.keys.length} generated` : 'colours only'}`);
+    const clipKeys = Object.entries(p.style.background.images || {}).filter(([, v]) => v && v.clip).map(([k]) => k);
+    if (clipKeys.length) lines.push(`Moving backgrounds (AI clips): ${clipKeys.join(', ')}`);
+    lines.push(`Look: ${p.style.look === 'collage' ? 'collage (Vox-style paper collage)' : 'default'}`);
+    const cuts = p.assets.items;
+    if (cuts.length) lines.push(`Cut-outs: ${cuts.filter((a) => a.blobId).length}/${cuts.length} made (${p.assets.style}); ${cuts.slice(0, 18).map((a) => `${a.id} ${a.sceneId} "${a.name}"${a.blobId ? '' : ' (no picture yet)'}`).join('; ')}`);
     lines.push(`Voice: ${p.voice.enabled ? `on, voice=${vd ? `${vd.id} (${vd.name})` : 'none'}, speed=${p.voice.speed}, clips ${vs.fresh}/${vs.total} up to date` : 'off'}`);
     lines.push(`Music: ${p.music.enabled ? `on, style=${p.music.styleId}${p.music.prompt ? ' custom prompt' : ''}, volume=${p.music.volume}, track=${musicStatus()}` : 'off'}`);
     lines.push(`Build: ${S.versions.length} versions${cur ? `, current v${cur.v}${contentStale(cur) ? ' (brief/facts/script changed since it was made)' : ''}${versionStale(cur) ? ' (video out of date with edits)' : ''}` : ''}${S.job ? `, last job ${S.job.kind} ${S.job.status}` : ''}`);

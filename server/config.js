@@ -2,6 +2,7 @@
 
 import { getJSON, putJSON } from './store.js';
 import { IMAGE_MODELS } from './images.js';
+import { VIDEO_MODELS } from './video.js';
 
 export const TTS_MODELS = ['eleven_multilingual_v2', 'eleven_v3', 'eleven_v4', 'eleven_flash_v2_5', 'eleven_turbo_v2_5'];
 export const MUSIC_MODELS = ['music_v2_5', 'music_v2', 'music_v1'];
@@ -24,6 +25,7 @@ export const DEFAULT_CONFIG = {
     { id: 'clean-corporate', name: 'Clean Corporate', colors: { bg: '#f4f7fb', surface: '#ffffff', text: '#0e1a2b', muted: '#5d6b80', accent: '#0a66ff', accent2: '#00b3a4', accent3: '#ff8a00' } },
     { id: 'mono-neon', name: 'Mono Neon', colors: { bg: '#0b0b0f', surface: '#17171f', text: '#ffffff', muted: '#8a8a99', accent: '#c6ff3d', accent2: '#ff3dbb', accent3: '#3dd6ff' } },
     { id: 'warm-earth', name: 'Warm Earth', colors: { bg: '#2a1f1a', surface: '#3a2c24', text: '#fbf3ea', muted: '#c2ad9c', accent: '#f2a541', accent2: '#e76f51', accent3: '#8ab17d' } },
+    { id: 'collage-paper', name: 'Collage Paper', colors: { bg: '#efe7d8', surface: '#fbf6ec', text: '#1c1a17', muted: '#6e665b', accent: '#f6c915', accent2: '#e2422e', accent3: '#2f6db5' } },
   ],
   models: {
     chat: 'qwen3.8-max',
@@ -32,6 +34,7 @@ export const DEFAULT_CONFIG = {
     tts: 'eleven_multilingual_v2',
     music: 'music_v2_5',
     image: 'qwen-image-3.0',
+    video: 'happyhorse-1.1-i2v',
   },
   defaults: { ratio: '16:9', language: 'ko', format: 'animated', length: 45, paletteId: 'midnight-orange', musicVolume: 0.22 },
 };
@@ -80,6 +83,7 @@ export function sanitizeConfig(c) {
     tts: TTS_MODELS.includes(m.tts) ? m.tts : DEFAULT_CONFIG.models.tts,
     music: MUSIC_MODELS.includes(m.music) ? m.music : DEFAULT_CONFIG.models.music,
     image: IMAGE_MODELS.includes(m.image) ? m.image : DEFAULT_CONFIG.models.image,
+    video: VIDEO_MODELS[m.video] ? m.video : DEFAULT_CONFIG.models.video,
   };
   const d = c.defaults || {};
   out.defaults = {

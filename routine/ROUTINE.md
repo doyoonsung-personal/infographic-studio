@@ -38,7 +38,8 @@ layout or motion. Then run `check`, `render` and `upload` (steps 3–5).
 **build** / **revise**:
 
 1. Read `docs/COMPOSITION.md` completely. It is the contract and the design rules.
-2. Read `work/<job_id>/BRIEF.md`.
+2. Read `work/<job_id>/BRIEF.md`. If it names a look (e.g. collage), read that look's guide in `docs/looks/`
+   too, and open the cut-out pictures in `work/<job_id>/assets/` with the Read tool before placing them.
    - **build (remake all):** design from scratch. There is no previous version, so don't go looking for one.
    - **revise (keep graphics):** also read `previous.html` and start from a copy of it. The brief is the
      source of truth for content: apply every item in "Changed since", and remove on-screen text that the

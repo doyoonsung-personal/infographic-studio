@@ -64,6 +64,14 @@ function blobHeaders(md) {
   };
 }
 
+/** A blob's bytes and type, or null. */
+export async function getBlob(env, id) {
+  if (!/^b_[\w-]+$/.test(id || '')) return null;
+  const { value, metadata } = await env.STUDIO_KV.getWithMetadata('blob:' + id, 'arrayBuffer');
+  if (!value) return null;
+  return { data: value, type: (metadata && metadata.type) || 'application/octet-stream', size: value.byteLength };
+}
+
 export async function getBlobText(env, id) {
   if (!id) return null;
   return env.STUDIO_KV.get('blob:' + id, 'text');

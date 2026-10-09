@@ -42,7 +42,43 @@ export function contentChanges(base, project) {
     if (stripTags(o.narration || '') !== stripTags(s.narration || '')) out.push(`- ${s.id} narration: was ${q(stripTags(o.narration || ''))}, now ${q(stripTags(s.narration || ''))}`);
   }
   for (const id of byId.keys()) out.push(`- Scene ${id} was removed`);
+  const lookThen = base.look || 'default', lookNow = (project.style && project.style.look) || 'default';
+  if (lookThen !== lookNow) out.push(`- Look: was "${lookThen}", now "${lookNow}" (restyle every scene for the new look; see "Look" below)`);
+  const made = (a) => ((a && a.items) || []).filter((x) => x.blobId);
+  const oldA = new Set(made(base.assets).map((x) => x.id));
+  const newA = made(project.assets);
+  for (const x of newA) if (!oldA.has(x.id)) out.push(`- Cut-out added: ${x.id} (${x.sceneId}, "${cell(x.name, 60)}"); place it`);
+  const newIds = new Set(newA.map((x) => x.id));
+  for (const id of oldA) if (!newIds.has(id)) out.push(`- Cut-out removed: ${id}; take it out of the composition`);
   return out;
+}
+
+/** The collage look, cut-outs and moving backgrounds (lines of markdown; empty when none apply). */
+function lookSection(project, tl) {
+  const L = [];
+  const st = project.style || {};
+  const cuts = ((project.assets && project.assets.items) || []).filter((a) => a.blobId);
+  const bg = st.background || {};
+  const clips = bg.mode === 'image' && !tl.static ? Object.keys(bg.images || {}).filter((k) => bg.images[k] && bg.images[k].clip) : [];
+  if (st.look === 'collage') {
+    L.push('', '## Look: editorial paper collage (Vox-style) — read `docs/looks/collage.md` before designing');
+    L.push('The stage already has paper texture and moving film grain. Build every scene from the collage toolkit in docs/COMPOSITION.md:');
+    L.push('cut-out photos with white borders (`.c-cutout`), torn paper (`.c-torn`), tape (`.c-tape`), newspaper clippings for the facts (`.c-clipping`),');
+    L.push('highlighter swipes on key words (`data-hl`), hand-drawn marker circles/arrows (`.c-marker` + `data-draw`), label strips (`.c-label`),');
+    L.push('stop-motion wobble (`data-boil`) and slow parallax (`data-drift`). Layer and overlap pieces; slight rotations; nothing perfectly aligned.');
+  }
+  if (cuts.length) {
+    L.push('', '## Cut-out pictures — place them with `<img data-asset="ID" class="c-cutout" alt="">`');
+    L.push('Transparent pictures of single subjects. Open the files with the Read tool to see them. Use each one in its scene (you may also reuse one elsewhere); size and rotate freely, keep the aspect ratio.');
+    L.push('');
+    L.push('| id | scene | what | size | file |');
+    L.push('|---|---|---|---|---|');
+    for (const a of cuts) L.push(`| ${a.id} | ${a.sceneId} | ${cell(a.name, 60)} — ${cell(a.subject, 140)} | ${a.w || '?'}×${a.h || '?'} | assets/${a.id}.* |`);
+  }
+  if (clips.length) {
+    L.push('', `**Moving backgrounds:** ${clips.join(', ')} ${clips.includes('all') ? '(one clip shared by all scenes)' : ''} — the background image of these scenes is a short video the stage plays automatically under the scrim. Design exactly as for background images; don't cover it with opaque full-scene panels.`);
+  }
+  return L;
 }
 
 export function writeBrief({ job, project, timeline: tl, hasPrevious, baseProject, baseVersion }) {
@@ -119,6 +155,7 @@ export function writeBrief({ job, project, timeline: tl, hasPrevious, baseProjec
   } else {
     L.push('- Background: colours only (no images).');
   }
+  L.push(...lookSection(project, tl));
 
   if (!tl.static) {
     L.push('');

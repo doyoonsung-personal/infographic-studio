@@ -57,6 +57,7 @@ export class Player {
       if (m.type === 'stage-ready') {
         this.info = m.info;
         this.ready = true;
+        this.sendClips();
         this.post({ type: 'seek', t: this.t });
         this.emit('ready', m.info);
       } else if (m.type === 'stage-error') {
@@ -101,9 +102,13 @@ export class Player {
     }
     this.t = Math.min(this.t, this.duration);
     this.audio = { voices: opts.voices || [], music: opts.music || null };
+    // Clip videos are too big for the document, so the stage gets them as bytes after it loads.
+    this.clipBytes = opts.clipBytes || null;
+    const clips = {};
+    for (const [k, c] of Object.entries(opts.clips || {})) clips[k] = { dur: c.dur };
     const doc = assembleDocument(opts.fragment, {
       runtime: await runtime(), timeline: tl, colors: opts.colors, font: opts.font, texts: opts.texts,
-      images: opts.images, bgStrength: opts.bgStrength,
+      images: opts.images, bgStrength: opts.bgStrength, look: opts.look, assets: opts.assets, clips,
     });
     const f = document.createElement('iframe');
     f.setAttribute('sandbox', 'allow-scripts');
@@ -121,6 +126,16 @@ export class Player {
   }
 
   apply(patch) { this.post({ type: 'apply', ...patch }); }
+
+  /** Post the clip videos ({key: Promise<ArrayBuffer>}) into the stage as they arrive. */
+  sendClips() {
+    const frame = this.frame;
+    for (const [k, p] of Object.entries(this.clipBytes || {})) {
+      Promise.resolve(p).then((buf) => {
+        if (buf && this.frame === frame) this.post({ type: 'clips', clips: { [k]: buf } });
+      }).catch(() => {});
+    }
+  }
 
   post(m) { if (this.frame && this.frame.contentWindow) this.frame.contentWindow.postMessage(m, '*'); }
 

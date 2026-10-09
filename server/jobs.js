@@ -224,7 +224,7 @@ export async function workerBundle(env, job) {
   if (base && base.jobId) {
     const bs = await getJSON(env, 'jobsnap:' + base.jobId);
     const bp = bs && bs.project;
-    if (bp) baseProject = { brief: bp.brief, facts: bp.facts, script: bp.script };
+    if (bp) baseProject = { brief: bp.brief, facts: bp.facts, script: bp.script, look: (bp.style && bp.style.look) || 'default', assets: bp.assets || null };
   }
   return { job: publicJob(job), project: snap.project, baseComposition: composition, baseVersion: base, baseProject };
 }

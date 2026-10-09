@@ -35,6 +35,8 @@
   function attr(el, name) { return el.getAttribute(name); }
   function has(el, name) { return el.hasAttribute(name); }
 
+  var errors = [];
+
   /* ---------- texts and colours ---------- */
   var defaults = {};
   try {
@@ -57,6 +59,15 @@
     }
   }
   bindTexts();
+
+  /* ---------- cut-out assets ---------- */
+  // <img data-asset="a_xxx"> gets its picture from CFG.assets (data: URI in the preview, a file in the renderer).
+  var ASSETS = CFG.assets || {};
+  Array.prototype.forEach.call(stage.querySelectorAll('img[data-asset]'), function (im) {
+    var id = attr(im, 'data-asset');
+    if (ASSETS[id]) im.src = ASSETS[id];
+    else if (Object.keys(ASSETS).length) report('asset not found: ' + id);
+  });
 
   /* ---------- scenes ---------- */
   var sceneEls = Array.prototype.slice.call(stage.querySelectorAll('.scene'));
@@ -90,6 +101,10 @@
   // adding an element with [data-bg-slot]; then only that element receives the image.
   var IMAGES = CFG.images || {};
   var bgStrength = clamp(num(CFG.bg && CFG.bg.strength, 0.45), 0.05, 0.95);
+  var CLIPS = CFG.clips || {};
+  var clipLayers = [];   // {key, sceneId, el (img | video), spec}
+  var sceneById = {};
+  scenes.forEach(function (s) { sceneById[s.id] = s; });
   sceneEls.forEach(function (el, i) {
     var id = attr(el, 'data-scene') || ('s' + (i + 1));
     var url = IMAGES[id] || IMAGES.all;
@@ -101,6 +116,8 @@
       slot.style.backgroundImage = css;
       if (!slot.style.backgroundSize) slot.style.backgroundSize = 'cover';
       if (!slot.style.backgroundPosition) slot.style.backgroundPosition = 'center';
+      var inSlot = makeClipLayer(id);
+      if (inSlot) { if (!slot.style.position) slot.style.position = 'relative'; inSlot.style.zIndex = '0'; slot.insertBefore(inSlot, slot.firstChild); }
       return;
     }
     var img = document.createElement('div');
@@ -116,11 +133,93 @@
       'background:linear-gradient(100deg, color-mix(in srgb, var(--bg) ' + Math.min(100, a + 12) + '%, transparent) 0%, ' +
       'color-mix(in srgb, var(--bg) ' + a + '%, transparent) 55%, color-mix(in srgb, var(--bg) ' + Math.max(0, a - 10) + '%, transparent) 100%)';
     el.insertBefore(scrim, el.firstChild);
+    var clipLayer = makeClipLayer(id);
+    if (clipLayer) el.insertBefore(clipLayer, el.firstChild);
     el.insertBefore(img, el.firstChild);
   });
 
+  /* ---------- moving backgrounds (AI clips of the background image) ---------- */
+  // CFG.clips[sceneId | 'all'] = {dur, frames, n, fps} in the renderer (numbered JPEG files, exact per frame)
+  // or {dur} in the preview, where the player sends the video bytes after load ('clips' message).
+  function makeClipLayer(sceneId) {
+    var key = CLIPS[sceneId] ? sceneId : CLIPS.all ? 'all' : null;
+    if (!key) return null;
+    var spec = CLIPS[key];
+    var wrap = document.createElement('div');
+    wrap.className = '__clip';
+    wrap.setAttribute('data-a', 'none');
+    wrap.setAttribute('data-ken', '1.05');
+    wrap.style.cssText = 'position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden;transform-origin:55% 50%';
+    var media = document.createElement(spec.frames ? 'img' : 'video');
+    media.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+    if (!spec.frames) { media.muted = true; media.playsInline = true; media.preload = 'auto'; media.loop = false; }
+    wrap.appendChild(media);
+    clipLayers.push({ key: key, sceneId: sceneId, el: media, spec: spec });
+    return wrap;
+  }
+
+  /** Clip time for scene-local time lt: real speed, slowed (not below half) to fill a longer scene, then held. */
+  function clipTime(c, lt, sceneLen) {
+    var dur = Math.max(0.1, num(c.spec.dur, 5));
+    var rate = sceneLen > dur ? Math.max(0.5, dur / sceneLen) : 1;
+    return clamp(lt * rate, 0, dur - 0.05);
+  }
+
+  var pendingFrames = [];
+  var clipPauseTimer = 0, lastSeekWall = 0, lastSeekT = -1;
+  function updateClips(T) {
+    if (!clipLayers.length) return;
+    // Preview only: a run of small forward seeks means the player is playing, so let the videos run.
+    var playing = false;
+    if (!clipLayers[0].spec.frames) {
+      var now = performance.now();
+      playing = T > lastSeekT && T - lastSeekT < 0.25 && now - lastSeekWall < 250;
+      lastSeekWall = now; lastSeekT = T;
+      clearTimeout(clipPauseTimer);
+      clipPauseTimer = setTimeout(function () { clipLayers.forEach(function (c) { if (c.el.pause) c.el.pause(); }); }, 260);
+    }
+    for (var i = 0; i < clipLayers.length; i++) {
+      var c = clipLayers[i];
+      var sc = sceneById[c.sceneId];
+      if (!sc) continue;
+      var visible = sc.el.style.visibility !== 'hidden';
+      var ct = clipTime(c, T - sc.start, sc.len);
+      if (c.spec.frames) {
+        var idx = Math.min((c.spec.n || 1) - 1, Math.floor(ct * (c.spec.fps || 30)));
+        var src = c.spec.frames + ('0000' + (idx + 1)).slice(-5) + '.jpg';
+        if (visible && c.el.getAttribute('src') !== src) { c.el.setAttribute('src', src); pendingFrames.push(c.el); }
+      } else if (c.el.src) {
+        if (!visible) { if (!c.el.paused) c.el.pause(); continue; }
+        var dur = Math.max(0.1, num(c.spec.dur, 5));
+        c.el.playbackRate = sc.len > dur ? Math.max(0.5, dur / sc.len) : 1;
+        if (Math.abs(c.el.currentTime - ct) > (playing ? 0.35 : 0.04)) c.el.currentTime = ct;
+        if (playing && c.el.paused && ct < dur - 0.06) c.el.play().catch(function () {});
+        if (!playing && !c.el.paused) c.el.pause();
+      }
+    }
+  }
+
+  /** Resolves when the clip frames set by the last seek have decoded (the renderer waits on it). */
+  function stageSettle() {
+    var list = pendingFrames;
+    pendingFrames = [];
+    return Promise.all(list.map(function (im) {
+      return im.decode ? im.decode().catch(function () {}) : null;
+    }));
+  }
+
+  function receiveClips(map) {
+    clipLayers.forEach(function (c) {
+      var buf = map && map[c.key];
+      if (!buf || c.spec.frames) return;
+      if (!c.url) c.url = URL.createObjectURL(new Blob([buf], { type: 'video/mp4' }));
+      c.el.src = c.url;
+      c.el.addEventListener('loadeddata', function () { seek(lastT); }, { once: true });
+    });
+  }
+
   /* ---------- per-element animation specs ---------- */
-  var ANIM_SEL = '[data-in],[data-cue],[data-a],[data-grow],[data-count],[data-draw],[data-type],[data-loop],[data-ken],[data-out],[data-out-cue]';
+  var ANIM_SEL = '[data-in],[data-cue],[data-a],[data-grow],[data-count],[data-draw],[data-type],[data-loop],[data-ken],[data-out],[data-out-cue],[data-hl],[data-boil],[data-drift]';
 
   function timeFor(el, sc, inAttr, cueAttr, delayAttr) {
     var cue = attr(el, cueAttr);
@@ -158,9 +257,13 @@
     var count = has(el, 'data-count');
     var draw = has(el, 'data-draw');
     var type = has(el, 'data-type');
+    var hl = has(el, 'data-hl');
+    // Only data-boil / data-drift (no entrance asked for): the element is simply there and moves.
+    var still = !has(el, 'data-a') && !has(el, 'data-in') && !has(el, 'data-cue') && !grow && !count && !draw && !type && !hl &&
+      !has(el, 'data-ken') && !has(el, 'data-loop') && (has(el, 'data-boil') || has(el, 'data-drift'));
     var anc = ancestorStart(el, sc);
     // A counter inside an animated card appears with the card; on its own it fades in.
-    var defA = (grow || draw || type) ? 'none' : (count ? (anc != null ? 'none' : 'fade') : 'up');
+    var defA = (grow || draw || type || hl || still) ? 'none' : (count ? (anc != null ? 'none' : 'fade') : 'up');
     var inT = timeFor(el, sc, 'data-in', 'data-cue', 'data-delay');
     if (inT == null && inherited) inT = inherited.inT;
     if (inT == null && anc != null) inT = anc;
@@ -168,8 +271,9 @@
     var a = attr(el, 'data-a') || (inherited && inherited.a) || defA;
     var spec = {
       el: el, isSvg: isSvg, a: a, inT: inT,
-      // Visible from the start of the scene (its parent handles the entrance); only the count waits.
-      showAlways: count && anc != null && !attr(el, 'data-a') && !has(el, 'data-in') && !has(el, 'data-cue'),
+      // Visible from the start of the scene (its parent handles the entrance); only the count or the
+      // highlighter sweep waits for its time.
+      showAlways: still || ((count && anc != null || hl) && !attr(el, 'data-a') && !(count && (has(el, 'data-in') || has(el, 'data-cue')))),
       d: num(attr(el, 'data-d'), a === 'pop' ? 0.55 : 0.6),
       ease: attr(el, 'data-ease') || (a === 'pop' ? 'back' : 'out'),
       dist: num(attr(el, 'data-dist'), 48),
@@ -180,8 +284,16 @@
       growD: num(attr(el, 'data-d'), 0.9),
       count: count, draw: draw, type: type,
       loop: attr(el, 'data-loop'), speed: num(attr(el, 'data-speed'), 1),
-      ken: has(el, 'data-ken') ? num(attr(el, 'data-ken'), 1.08) : null
+      ken: has(el, 'data-ken') ? num(attr(el, 'data-ken'), 1.08) : null,
+      hl: hl, hlD: num(attr(el, 'data-hl'), 0) > 0 ? num(attr(el, 'data-hl'), 0) : 0.7,
+      boil: has(el, 'data-boil') ? num(attr(el, 'data-boil'), 1.2) || 1.2 : 0,
+      seed: sc.anims.length * 7919 + sc.index * 104729 + 17,
+      drift: null
     };
+    if (has(el, 'data-drift')) {
+      var dv = String(attr(el, 'data-drift')).split(/[ ,]+/).map(function (x) { return num(x, 0); });
+      spec.drift = { x: dv[0] || 0, y: dv[1] || 0 };
+    }
     if (count) {
       spec.from = num(attr(el, 'data-from'), 0);
       spec.toN = num(attr(el, 'data-count'), num(attr(el, 'data-to'), 0));
@@ -290,6 +402,19 @@
       else if (s.loop === 'sway') rot += Math.sin(lp * 2 * Math.PI / (4 / s.speed)) * 3;
     }
     if (s.ken != null) sc *= lerp(1, s.ken, clamp(lt / Math.max(0.1, sceneLen)));
+    if (s.drift) {
+      // Parallax: glide by (x, y) px over the scene.
+      var dp = clamp(lt / Math.max(0.1, sceneLen));
+      tx += s.drift.x * dp; ty += s.drift.y * dp;
+    }
+    if (s.boil) {
+      // Stop-motion wobble: a new small random pose 8 times a second (seeded, so the same t gives the same pose).
+      var rb = rand(s.seed + Math.floor(Math.max(0, lt) * 8) * 2654435761);
+      rot += (rb() - 0.5) * 2 * s.boil;
+      tx += (rb() - 0.5) * 2.4 * s.boil;
+      ty += (rb() - 0.5) * 2.4 * s.boil;
+    }
+    if (s.hl) el.style.backgroundSize = (prog(lt, s.inT, s.hlD, 'inout') * 100).toFixed(2) + '% 46%';
 
     el.style.opacity = op >= 0.999 ? '' : op.toFixed(4);
     el.style.translate = (tx || ty) ? tx.toFixed(2) + 'px ' + ty.toFixed(2) + 'px' : '';
@@ -328,6 +453,7 @@
 
   var hooks = window.STAGE_HOOKS || {};
   var lastT = 0;
+  var GRAINY = stage.getAttribute('data-look') === 'collage' || !!stage.querySelector('.c-grain');
 
   function seek(t) {
     t = Number(t) || 0;
@@ -362,6 +488,13 @@
     for (var g = 0; g < globalProgress.length; g++) {
       globalProgress[g].style.width = (DURATION > 0 ? clamp(T / DURATION) * 100 : 100).toFixed(3) + '%';
     }
+    if (GRAINY) {
+      // Film grain jumps 12 times a second.
+      var gs = STATIC ? 0 : Math.floor(T * 12);
+      root.style.setProperty('--grain-x', ((gs * 97) % 300) + 'px');
+      root.style.setProperty('--grain-y', ((gs * 173) % 300) + 'px');
+    }
+    updateClips(T);
     if (typeof hooks['*'] === 'function') {
       try { hooks['*'](ctxFor(null, T, T)); } catch (e) { report(e); }
     }
@@ -378,7 +511,6 @@
     };
   }
 
-  var errors = [];
   function report(e) {
     var msg = String(e && e.message || e);
     if (errors.indexOf(msg) < 0) errors.push(msg);
@@ -411,6 +543,7 @@
 
   window.DURATION = DURATION;
   window.seek = seek;
+  window.stageSettle = stageSettle;
   window.STAGE_READY = ready;
   window.stageApply = stageApply;
   window.stageInfo = function () {
@@ -426,6 +559,7 @@
     var m = e.data || {};
     if (m.type === 'seek') seek(m.t);
     else if (m.type === 'apply') stageApply(m);
+    else if (m.type === 'clips') receiveClips(m.clips);
   });
 
   seek(0);
