@@ -195,6 +195,18 @@ async function cmdFetch() {
     await download(id, m.track.blobId, path.join(dir, 'audio', 'music.mp3'));
   }
 
+  // Background images (style.background.mode === 'image').
+  const bg = (project.style && project.style.background) || {};
+  let nImages = 0;
+  if (bg.mode === 'image') {
+    fs.mkdirSync(path.join(dir, 'images'), { recursive: true });
+    for (const [key, im] of Object.entries(bg.images || {})) {
+      if (!im || !im.blobId || !/^[\w-]+$/.test(key)) continue;
+      await download(id, im.blobId, path.join(dir, 'images', `${key}.img`));
+      nImages++;
+    }
+  }
+
   const briefPath = path.join(dir, 'BRIEF.md');
   fs.writeFileSync(briefPath, writeBrief({ job, project, timeline: tl, hasPrevious: Boolean(bundle.baseComposition), dir }));
   await status(id, job.kind === 'render' ? 'Re-rendering with your edits' : 'Claude is designing the infographic', 'designing');
@@ -203,7 +215,7 @@ async function cmdFetch() {
   console.log(`  brief:       ${rel(briefPath)}`);
   console.log(`  timeline:    ${rel(path.join(dir, 'timeline.json'))}  (${tl.scenes.length} scenes, ${tl.duration}s, ${tl.width}x${tl.height}${tl.static ? ', static' : ''})`);
   if (bundle.baseComposition) console.log(`  previous:    ${rel(path.join(dir, 'previous.html'))}`);
-  console.log(`  narration:   ${n} clip(s)${m && m.enabled && m.track ? ', music: yes' : ''}`);
+  console.log(`  narration:   ${n} clip(s)${m && m.enabled && m.track ? ', music: yes' : ''}${nImages ? `, background images: ${nImages}` : ''}`);
   console.log(`  write to:    ${rel(path.join(dir, 'composition.html'))}`);
   if (job.kind === 'render') console.log('  (render job: composition.html already copied from the previous version; go straight to check + render)');
 }
@@ -230,13 +242,31 @@ function loadJob(id) {
 
 function docFor(ctx) {
   const st = ctx.project.style || {};
+  const bg = st.background || {};
   return assembleDocument(ctx.fragment, {
     runtime: RUNTIME,
     timeline: ctx.timeline,
     colors: st.colors,
     font: st.font,
     texts: (ctx.project.edits && ctx.project.edits.texts) || {},
+    images: bg.mode === 'image' ? backgroundImages(ctx.dir) : {},
+    bgStrength: bg.strength,
   });
+}
+
+/** work/<job>/images/<key>.img -> {key: data URI} (JPEG or PNG, sniffed from the bytes). */
+function backgroundImages(dir) {
+  const d = path.join(dir, 'images');
+  const out = {};
+  if (!fs.existsSync(d)) return out;
+  for (const f of fs.readdirSync(d)) {
+    const m = /^([\w-]+)\.img$/.exec(f);
+    if (!m) continue;
+    const buf = fs.readFileSync(path.join(d, f));
+    const type = buf[0] === 0x89 && buf[1] === 0x50 ? 'image/png' : buf[0] === 0x52 && buf[8] === 0x57 ? 'image/webp' : 'image/jpeg';
+    out[m[1]] = `data:${type};base64,${buf.toString('base64')}`;
+  }
+  return out;
 }
 
 async function openStage(ctx, browser) {

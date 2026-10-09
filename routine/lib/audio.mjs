@@ -12,7 +12,7 @@ export async function mixAudio({ dir, timeline: tl, project }) {
   for (const s of tl.scenes) {
     const f = path.join(dir, 'audio', `voice_${s.id}.mp3`);
     if (s.voice && fs.existsSync(f)) {
-      voices.push({ idx: inputs.length, at: s.voice.at });
+      voices.push({ idx: inputs.length, at: s.voice.at, dur: s.voice.dur });
       inputs.push(f);
     }
   }
@@ -26,7 +26,9 @@ export async function mixAudio({ dir, timeline: tl, project }) {
   const f = [];
   voices.forEach((v, i) => {
     const ms = Math.max(0, Math.round(v.at * 1000));
-    f.push(`[${v.idx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay=delays=${ms}:all=1[v${i}]`);
+    // Cut each clip just after its last spoken character (with a short fade): what follows is a breath.
+    const trim = v.dur ? `atrim=0:${(v.dur + 0.18).toFixed(3)},afade=t=out:st=${(v.dur + 0.08).toFixed(3)}:d=0.1,` : '';
+    f.push(`[${v.idx}:a]${trim}aresample=44100,aformat=channel_layouts=stereo,adelay=delays=${ms}:all=1[v${i}]`);
   });
   if (voices.length > 1) f.push(`${voices.map((_, i) => `[v${i}]`).join('')}amix=inputs=${voices.length}:normalize=0:dropout_transition=0[nar]`);
   else if (voices.length === 1) f.push('[v0]anull[nar]');

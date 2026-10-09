@@ -12,6 +12,8 @@ async function runtime() {
 }
 
 const bufferCache = new Map();
+export const CLIP_TAIL = 0.18; // seconds kept after a clip's last spoken character
+export const CLIP_FADE = 0.1;
 let actx = null;
 function audioCtx() {
   if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
@@ -101,6 +103,7 @@ export class Player {
     this.audio = { voices: opts.voices || [], music: opts.music || null };
     const doc = assembleDocument(opts.fragment, {
       runtime: await runtime(), timeline: tl, colors: opts.colors, font: opts.font, texts: opts.texts,
+      images: opts.images, bgStrength: opts.bgStrength,
     });
     const f = document.createElement('iframe');
     f.setAttribute('sandbox', 'allow-scripts');
@@ -198,11 +201,21 @@ export class Player {
       this.sources = [];
       this.audio.voices.forEach((v, i) => {
         const b = voiceBufs[i];
-        if (!b || v.at + b.duration <= t0) return;
+        // Play each clip only to just after its last spoken character, with a short fade:
+        // anything after that is a trailing breath.
+        const len = Math.min(b ? b.duration : 0, (v.dur || (b ? b.duration : 0)) + CLIP_TAIL);
+        if (!b || v.at + len <= t0) return;
         const src = ctx.createBufferSource();
         src.buffer = b;
-        src.connect(ctx.destination);
-        src.start(now + Math.max(0, v.at - t0), Math.max(0, t0 - v.at));
+        const g = ctx.createGain();
+        src.connect(g);
+        g.connect(ctx.destination);
+        const offset = Math.max(0, t0 - v.at);
+        const when = now + Math.max(0, v.at - t0);
+        const endAt = when + (len - offset);
+        g.gain.setValueAtTime(1, Math.max(now, endAt - CLIP_FADE));
+        g.gain.linearRampToValueAtTime(0, endAt);
+        src.start(when, offset, Math.max(0.01, len - offset));
         this.sources.push(src);
       });
       if (musicBuf) {
@@ -213,7 +226,7 @@ export class Player {
         this.audio.voices.forEach((v, i) => {
           const b = voiceBufs[i];
           if (!b) return;
-          const a = now + (v.at - t0), e = now + (v.at + b.duration - t0);
+          const a = now + (v.at - t0), e = now + (v.at + Math.min(b.duration, (v.dur || b.duration) + CLIP_TAIL) - t0);
           if (e < now) return;
           g.gain.setValueAtTime(vol, Math.max(now, a - 0.25));
           g.gain.linearRampToValueAtTime(vol * 0.35, Math.max(now, a));

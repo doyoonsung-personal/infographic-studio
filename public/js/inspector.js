@@ -156,6 +156,7 @@ const RENDER = {
     const st = A.S.p.style;
     const c = st.colors || {};
     const cr = c.text && c.bg ? contrast(c.text, c.bg) : 21;
+    backgroundSection(body, A);
     body.append(h('div', { class: 'sec' }, t('palettes')));
     for (const pal of A.S.config.palettes || []) {
       body.append(h('div', { class: 'pal' + (st.paletteId === pal.id && !st.paletteName ? ' on' : ''), onclick: () => A.applyPalette({ ...pal, name: null }) }, h('span', {}, pal.name), swatch(pal.colors)));
@@ -343,6 +344,49 @@ const RENDER = {
     }
   },
 };
+
+/** Style → 배경: colours only, or AI background images (one per scene or one shared). */
+function backgroundSection(body, A) {
+  const p = A.S.p;
+  const bg = p.style.background;
+  const isStatic = p.brief.format === 'static';
+  body.append(h('div', { class: 'sec' }, t('bg_title')));
+  body.append(seg([['color', t('bg_color')], ['image', t('bg_image')]], bg.mode, (v) => A.setBackground({ mode: v })));
+  if (bg.mode !== 'image') {
+    body.append(h('div', { class: 'hint' }, t('bg_color_hint')));
+    return;
+  }
+  const row = h('div', { class: 'row wrap' });
+  if (!isStatic) row.append(field(t('bg_scope'), seg([['scene', t('bg_per_scene')], ['single', t('bg_single')]], bg.scope, (v) => A.setBackground({ scope: v }))));
+  row.append(field(t('bg_look'), h('select', { onchange: (e) => A.setBackground({ look: e.target.value }) },
+    [['photo', t('bg_photo')], ['illustration', t('bg_illus')], ['3d', t('bg_3d')], ['abstract', t('bg_abstract')]].map(([v, l]) => h('option', { value: v, selected: bg.look === v }, l)))));
+  body.append(row);
+  body.append(field(t('bg_notes'), h('input', { type: 'text', value: bg.notes || '', placeholder: t('bg_notes_ph'), oninput: (e) => A.setBackground({ notes: e.target.value, _typing: true }) })));
+  const sv = h('span', { class: 'tag' }, Math.round((bg.strength ?? 0.45) * 100) + '%');
+  body.append(field(t('bg_strength'), h('div', { class: 'row' },
+    h('input', { type: 'range', min: 0.1, max: 0.9, step: 0.05, value: bg.strength ?? 0.45, class: 'grow', oninput: (e) => { sv.textContent = Math.round(e.target.value * 100) + '%'; }, onchange: (e) => A.setBackground({ strength: e.target.value }) }), sv)));
+  const bs = A.bgStatus();
+  const model = (A.S.config.models && A.S.config.models.image) || 'qwen-image-3.0';
+  const each = { 'z-image-turbo': 0.015, 'qwen-image-max': 0.075 }[model] ?? 0.03;
+  const todo = bs.missing.length || bs.keys.length;
+  body.append(h('div', { class: 'row wrap' },
+    busyBtn(A, 'style', bs.missing.length ? t('bg_generate', { n: bs.missing.length }) : t('bg_regen_all', { n: bs.keys.length }),
+      () => A.generateBackgrounds(bs.missing.length ? bs.missing : null), 'btn primary', 'wand'),
+    h('span', { class: 'hint' }, `≈ $${(todo * each).toFixed(2)} · ${model}`)));
+  const grid = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: '8px' } });
+  for (const k of bs.keys) {
+    const im = (bg.images || {})[k];
+    const scene = p.script.scenes.find((s) => s.id === k);
+    grid.append(h('div', { class: 'card', style: { padding: '6px', gap: '6px' } },
+      im ? h('img', { src: blobUrl(im.blobId), alt: '', title: im.prompt || '', style: { width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: '6px', background: 'var(--panel3)' } })
+        : h('div', { style: { aspectRatio: '16/9', borderRadius: '6px', background: 'var(--panel3)', display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: '11px' } }, t('clip_missing')),
+      h('div', { class: 'row' }, h('span', { class: 'mono grow', style: { fontSize: '11px', color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, k === 'all' ? t('bg_single') : `${k} ${scene && scene.title ? scene.title : ''}`),
+        h('button', { class: 'btn xs icon', title: t('regen'), disabled: A.S.busy.style, onclick: () => A.generateBackgrounds([k]).catch(() => {}) }, icon('refresh')),
+        im ? h('button', { class: 'btn xs icon ghost', title: t('remove'), onclick: () => A.removeBackground(k) }, icon('trash')) : null)));
+  }
+  body.append(grid);
+  body.append(h('div', { class: 'hint' }, t('bg_hint')));
+}
 
 function paletteIdea(pal, A) {
   const sc = scorePalette(pal.colors);

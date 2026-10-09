@@ -5,7 +5,7 @@ import { api, blobUrl, blobText, ApiError } from './api.js';
 import { h, icon, debounce, clone, fmtTime, fmtDate, uid } from './util.js';
 import { t, getLang } from './i18n.js';
 import { computeTimeline, spokenText, clipKey, clipFresh, TAG_MODELS, hasTags, stripTags } from './timeline.js';
-import { styleKey, FONT_STACKS } from './assemble.js';
+import { styleKey, FONT_STACKS, backgroundKeys } from './assemble.js';
 import { extractTexts } from './lint.js';
 import * as ai from './ai.js';
 import { Player } from './player.js';
@@ -30,6 +30,7 @@ export function normalize(p, config) {
   p.facts = { items: [], sources: [], summary: '', ...(p.facts || {}) };
   p.script = { scenes: [], ...(p.script || {}) };
   p.style = { paletteId: pal ? pal.id : null, colors: pal ? clone(pal.colors) : null, font: 'sans', motion: 'lively', notes: '', ...(p.style || {}) };
+  p.style.background = { mode: 'color', scope: 'scene', look: 'photo', notes: '', strength: 0.45, images: {}, ...(p.style.background || {}) };
   const firstVoice = (config.voices || []).find((v) => !v.language || v.language === p.brief.language) || (config.voices || [])[0];
   p.voice = { enabled: Boolean(firstVoice) && p.brief.format !== 'static', voiceRef: firstVoice ? firstVoice.id : null, speed: 1, clips: {}, ...(p.voice || {}) };
   const ms = (config.musicStyles || [])[0];
@@ -121,6 +122,13 @@ export async function openStudio(root, projectId, app) {
     return 'ok';
   }
 
+  function bgStatus() {
+    const keys = backgroundKeys(S.p);
+    const im = S.p.style.background.images || {};
+    const missing = keys.filter((k) => !im[k]);
+    return { keys, have: keys.length - missing.length, missing };
+  }
+
   function currentVersion() {
     if (!S.versions.length) return null;
     return S.versions.find((v) => v.v === S.p.build.current) || S.versions[S.versions.length - 1];
@@ -144,7 +152,11 @@ export async function openStudio(root, projectId, app) {
       case 'brief': return p.brief.topic && p.brief.takeaway ? 'done' : p.brief.topic ? 'ready' : 'empty';
       case 'facts': return p.facts.items.length ? 'done' : p.facts.skipped ? 'off' : 'empty';
       case 'script': return p.script.scenes.length ? 'done' : 'empty';
-      case 'style': return p.style.colors ? 'done' : 'empty';
+      case 'style': {
+        if (!p.style.colors) return 'empty';
+        const bs = bgStatus();
+        return bs.missing.length && bs.keys.length ? 'stale' : 'done';
+      }
       case 'voice': {
         if (!p.voice.enabled || p.brief.format === 'static') return 'off';
         const vs = voiceStatus();
@@ -187,7 +199,7 @@ export async function openStudio(root, projectId, app) {
 
   /* ---------- actions (used by inspector + chat) ---------- */
   const A = {
-    S, timeline, voiceDef, voiceStatus, musicStatus, musicTarget, musicPrompt, currentVersion, versionStale, nodeStatus,
+    S, timeline, voiceDef, voiceStatus, musicStatus, musicTarget, musicPrompt, currentVersion, versionStale, nodeStatus, bgStatus,
     changed, pushHistory,
     select(key) { S.sel = key; studio.classList.toggle('no-insp', !key); renderCanvas(); renderInsp(); },
 
@@ -309,6 +321,44 @@ export async function openStudio(root, projectId, app) {
       });
     },
 
+    setBackground(patch) {
+      const bg = S.p.style.background;
+      for (const k of ['mode', 'scope', 'look', 'notes', 'strength']) {
+        if (patch[k] !== undefined) bg[k] = k === 'strength' ? Math.min(0.9, Math.max(0.1, Number(patch[k]) || 0.45)) : patch[k];
+      }
+      changed({ inspector: S.sel === 'style' && !patch._typing, preview: !patch._typing });
+    },
+
+    /** Generate background images (paid: one image per scene, or one shared image). */
+    async generateBackgrounds(keys) {
+      const bg = S.p.style.background;
+      const all = backgroundKeys(S.p);
+      const targets = keys && keys.length ? keys.filter((k) => all.includes(k)) : all;
+      if (!targets.length) return { generated: 0 };
+      return A.busy('style', async () => {
+        progress('style', '✍ prompts…');
+        const prompts = await ai.backgroundPrompts(S.p, targets);
+        let n = 0;
+        for (const k of targets) {
+          progress('style', `🖼 ${n + 1}/${targets.length}`);
+          const prompt = prompts[k];
+          if (!prompt) continue;
+          const r = await api('image', { method: 'POST', body: { prompt, ratio: S.p.brief.ratio } });
+          const small = await compressImage(r.blobId).catch(() => null);
+          bg.images = bg.images || {};
+          bg.images[k] = { blobId: small || r.blobId, original: r.blobId, prompt, model: r.model, at: Date.now() };
+          n++;
+          changed({ inspector: S.sel === 'style', preview: true });
+        }
+        return { generated: n };
+      });
+    },
+
+    removeBackground(key) {
+      if (S.p.style.background.images) delete S.p.style.background.images[key];
+      changed({ inspector: true, preview: true });
+    },
+
     setVoice(patch) {
       for (const k of ['enabled', 'voiceRef', 'speed']) if (patch[k] !== undefined) S.p.voice[k] = k === 'speed' ? Math.min(1.2, Math.max(0.7, Number(patch[k]) || 1)) : patch[k];
       changed({ inspector: S.sel === 'voice' && !patch._typing, preview: true });
@@ -402,8 +452,9 @@ export async function openStudio(root, projectId, app) {
               modelId: model,
               speed: S.p.voice.speed || 1,
               languageCode: S.p.brief.language,
+              // Only the previous line is sent for continuity. Sending the next line made the voice
+              // treat each clip as mid-speech and take a breath (a "gasp") at the end.
               previousText: i > 0 ? spokenText(stripTags(scenes[i - 1].narration)) : undefined,
-              nextText: i < scenes.length - 1 ? spokenText(stripTags(scenes[i + 1].narration)) : undefined,
             },
           });
           S.p.voice.clips[id] = { blobId: r.blobId, duration: r.duration, alignment: r.alignment, key: clipKey(s.narration, S.p.voice.voiceRef, S.p.voice.speed || 1), at: Date.now(), modelId: r.modelId };
@@ -569,15 +620,40 @@ export async function openStudio(root, projectId, app) {
     if (S.sel === 'preview' || S.sel === 'build') renderInsp();
   }
 
-  function playerOpts() {
-    const tl = timeline();
-    const voices = tl.scenes.filter((s) => s.voice).map((s) => ({ url: blobUrl(s.voice.blobId), at: s.voice.at }));
-    const m = S.p.music;
-    const music = m.enabled && m.track && !tl.static ? { url: blobUrl(m.track.blobId), volume: m.volume } : null;
-    return { fragment: S.comp.fragment, timeline: tl, colors: S.p.style.colors, font: fontStack(S.p.style.font), texts: S.p.edits.texts || {}, voices, music };
+  // Background images go into the sandboxed preview as data: URIs (it can't fetch our cookie-protected blobs).
+  const bgData = new Map();
+  async function ensureBgData() {
+    const bg = S.p.style.background;
+    if (bg.mode !== 'image') return;
+    const ids = Object.values(bg.images || {}).map((x) => x && x.blobId).filter((id) => id && !bgData.has(id));
+    await Promise.all(ids.map(async (id) => {
+      try {
+        const blob = await (await fetch(blobUrl(id), { credentials: 'same-origin' })).blob();
+        bgData.set(id, await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); }));
+      } catch (e) { console.warn('background', id, e); }
+    }));
+  }
+  function bgImagesForPreview() {
+    const bg = S.p.style.background;
+    if (bg.mode !== 'image') return {};
+    const out = {};
+    for (const [k, v] of Object.entries(bg.images || {})) if (v && bgData.has(v.blobId)) out[k] = bgData.get(v.blobId);
+    return out;
   }
 
-  const refreshPreview = debounce(() => {
+  function playerOpts() {
+    const tl = timeline();
+    const voices = tl.scenes.filter((s) => s.voice).map((s) => ({ url: blobUrl(s.voice.blobId), at: s.voice.at, dur: s.voice.dur }));
+    const m = S.p.music;
+    const music = m.enabled && m.track && !tl.static ? { url: blobUrl(m.track.blobId), volume: m.volume } : null;
+    return {
+      fragment: S.comp.fragment, timeline: tl, colors: S.p.style.colors, font: fontStack(S.p.style.font), texts: S.p.edits.texts || {},
+      images: bgImagesForPreview(), bgStrength: S.p.style.background.strength, voices, music,
+    };
+  }
+
+  const refreshPreview = debounce(async () => {
+    if (S.comp) await ensureBgData();
     for (const pl of players()) {
       if (!S.comp) pl.showEmpty(t('preview_empty'));
       else pl.load(playerOpts());
@@ -586,10 +662,11 @@ export async function openStudio(root, projectId, app) {
   A.refreshPreview = refreshPreview;
   A.makeInspectorPlayer = () => {
     if (S.inspPlayer) S.inspPlayer.destroy();
-    S.inspPlayer = new Player({ maxHeight: 0.5 });
-    if (!S.comp) S.inspPlayer.showEmpty(t('preview_empty'));
-    else S.inspPlayer.load(playerOpts());
-    return S.inspPlayer;
+    const pl = new Player({ maxHeight: 0.5 });
+    S.inspPlayer = pl;
+    if (!S.comp) pl.showEmpty(t('preview_empty'));
+    else ensureBgData().then(() => { if (S.inspPlayer === pl) pl.load(playerOpts()); });
+    return pl;
   };
   A.dropInspectorPlayer = () => { if (S.inspPlayer) { S.inspPlayer.destroy(); S.inspPlayer = null; } };
 
@@ -676,8 +753,10 @@ export async function openStudio(root, projectId, app) {
       case 'style': {
         const c = p.style.colors || {};
         body = [h('div', { class: 'mini-swatch' }, ['bg', 'surface', 'text', 'accent', 'accent2', 'accent3'].map((k) => h('i', { style: { background: c[k] || '#333' } }))),
-          h('div', { class: 'line' }, [p.style.paletteName || (S.config.palettes.find((x) => x.id === p.style.paletteId) || {}).name || 'Custom', p.style.font, t(p.style.motion || 'lively')].join(' · '))];
-        foot = [openBtn];
+          h('div', { class: 'line' }, [p.style.paletteName || (S.config.palettes.find((x) => x.id === p.style.paletteId) || {}).name || 'Custom', p.style.font, t(p.style.motion || 'lively')].join(' · ')),
+          h('div', { class: 'line' }, p.style.background.mode === 'image' ? `${t('bg_title')}: ${t('bg_image')} ${bgStatus().have}/${bgStatus().keys.length}` : `${t('bg_title')}: ${t('bg_color')}`)];
+        foot = [p.style.background.mode === 'image' && bgStatus().missing.length
+          ? regen(t('bg_generate', { n: bgStatus().missing.length }), () => A.generateBackgrounds(bgStatus().missing)) : null, openBtn];
         break;
       }
       case 'voice': {
@@ -777,6 +856,8 @@ export async function openStudio(root, projectId, app) {
     lines.push(`Script (${p.script.scenes.length} scenes, ${tl.static ? 'static' : tl.duration + 's'}):`);
     for (const s of p.script.scenes) lines.push(`  ${s.id} "${s.title}" narration: ${s.narration.slice(0, 160)} | onscreen: ${s.onscreen.slice(0, 100)}`);
     lines.push(`Style: palette=${p.style.paletteName || p.style.paletteId || 'custom'} colors=${JSON.stringify(p.style.colors)} font=${p.style.font} motion=${p.style.motion}`);
+    const bgs = bgStatus();
+    lines.push(`Background: ${p.style.background.mode === 'image' ? `AI images (${p.style.background.scope}, look=${p.style.background.look}, strength=${p.style.background.strength}), ${bgs.have}/${bgs.keys.length} generated` : 'colours only'}`);
     lines.push(`Voice: ${p.voice.enabled ? `on, voice=${vd ? `${vd.id} (${vd.name})` : 'none'}, speed=${p.voice.speed}, clips ${vs.fresh}/${vs.total} up to date` : 'off'}`);
     lines.push(`Music: ${p.music.enabled ? `on, style=${p.music.styleId}${p.music.prompt ? ' custom prompt' : ''}, volume=${p.music.volume}, track=${musicStatus()}` : 'off'}`);
     lines.push(`Build: ${S.versions.length} versions${cur ? `, current v${cur.v}${versionStale(cur) ? ' (video out of date with edits)' : ''}` : ''}${S.job ? `, last job ${S.job.kind} ${S.job.status}` : ''}`);
@@ -822,6 +903,24 @@ export async function openStudio(root, projectId, app) {
       A.dropInspectorPlayer();
     },
   };
+}
+
+/**
+ * Shrink a generated image (PNG, ~2 MB) to a JPEG of at most 1920 px on the long side and store it.
+ * Smaller files keep the preview and the cloud render quick. Returns the new blob id.
+ */
+async function compressImage(blobId) {
+  const src = await (await fetch(blobUrl(blobId), { credentials: 'same-origin' })).blob();
+  const bmp = await createImageBitmap(src);
+  const scale = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale);
+  c.height = Math.round(bmp.height * scale);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  const jpg = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.86));
+  if (!jpg) return null;
+  const r = await api('blobs', { method: 'POST', raw: true, body: jpg, headers: { 'content-type': 'image/jpeg', 'x-file-name': 'background.jpg' } });
+  return r.blobId;
 }
 
 export function fontStack(key) {

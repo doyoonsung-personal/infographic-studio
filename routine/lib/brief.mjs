@@ -67,6 +67,17 @@ export function writeBrief({ job, project, timeline: tl, hasPrevious }) {
   L.push(`- Font: \`var(--font)\` = ${st.font || 'sans'} (${FONT_STACKS[st.font] || FONT_STACKS.sans})`);
   if (st.motion) L.push(`- Motion feel: ${st.motion}`);
   if (st.notes) L.push(`- Style notes: ${st.notes}`);
+  const bg = st.background || {};
+  const imgKeys = Object.keys(bg.images || {});
+  if (bg.mode === 'image' && imgKeys.length) {
+    L.push('');
+    L.push(`**Background images: ON** (${bg.scope === 'single' ? 'one image shared by all scenes' : 'one image per scene: ' + imgKeys.join(', ')}, visibility ${Math.round((bg.strength ?? 0.45) * 100)}%).`);
+    L.push('The stage puts each image behind its scene automatically (slow zoom + a scrim in var(--bg)), so design on top of it:');
+    L.push('keep panels/cards semi-opaque (`color-mix(in srgb, var(--surface) 82%, transparent)`) where text sits on busy areas, and');
+    L.push('don\'t paint opaque full-scene backgrounds that would hide the image. See "Background images" in docs/COMPOSITION.md.');
+  } else {
+    L.push('- Background: colours only (no images).');
+  }
 
   if (!tl.static) {
     L.push('');

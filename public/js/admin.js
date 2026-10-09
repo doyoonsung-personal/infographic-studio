@@ -8,6 +8,10 @@ import { playOne } from './player.js';
 
 const TTS_MODELS = ['', 'eleven_multilingual_v2', 'eleven_v3', 'eleven_v4', 'eleven_flash_v2_5', 'eleven_turbo_v2_5'];
 const MUSIC_MODELS = ['music_v2_5', 'music_v2', 'music_v1'];
+const IMAGE_MODELS = [
+  ['qwen-image-3.0', 'qwen-image-3.0 · $0.03'], ['qwen-image-3.0-pro', 'qwen-image-3.0-pro'], ['qwen-image-max', 'qwen-image-max · $0.075'],
+  ['z-image-turbo', 'z-image-turbo · $0.015'], ['wan2.7-image', 'wan2.7-image · $0.03'],
+];
 const QWEN = ['qwen3.8-flash', 'qwen3.8-max', 'qwen3.8-27b', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.7-flash'];
 
 export async function openAdmin(root, app) {
@@ -194,7 +198,8 @@ export async function openAdmin(root, app) {
         lab(t('writer_model'), inp(m, 'writer', { list: 'qwen-models' })),
         lab(t('research_model'), inp(m, 'research', { list: 'qwen-models' })),
         lab(t('tts_model'), sel(m, 'tts', TTS_MODELS.filter(Boolean).map((x) => [x, x]))),
-        lab(t('music_model'), sel(m, 'music', MUSIC_MODELS.map((x) => [x, x])))),
+        lab(t('music_model'), sel(m, 'music', MUSIC_MODELS.map((x) => [x, x]))),
+        lab(t('image_model'), sel(m, 'image', IMAGE_MODELS.map(([x, l]) => [x, l])))),
       h('div', { class: 'grid3' },
         lab(t('ratio'), sel(d, 'ratio', [['16:9', '16:9'], ['9:16', '9:16'], ['1:1', '1:1'], ['4:5', '4:5'], ['a4', 'A4']])),
         lab(t('language'), sel(d, 'language', [['ko', '한국어'], ['en', 'English']])),

@@ -144,6 +144,59 @@ function normScene(s, id) {
   };
 }
 
+/* ---------- background images ---------- */
+
+export const BG_LOOKS = {
+  photo: 'cinematic editorial photography, natural soft light, shallow depth of field, subtle film grain',
+  illustration: 'modern flat vector illustration, clean geometric shapes, gentle gradients, subtle paper grain',
+  '3d': 'soft 3D clay render, rounded shapes, matte materials, soft studio lighting',
+  abstract: 'abstract composition of soft gradients, light leaks and translucent shapes, minimal',
+};
+
+/**
+ * Write one image prompt per key ('all' = one shared image, else a scene id).
+ * Returns {key: prompt}. Prompts are English; images must carry no text.
+ */
+export async function backgroundPrompts(p, keys, opts) {
+  const b = p.brief || {};
+  const st = p.style || {};
+  const bg = st.background || {};
+  const c = st.colors || {};
+  const scenes = (p.script && p.script.scenes) || [];
+  const ratio = b.ratio === '9:16' || b.ratio === 'a4' || b.ratio === '4:5' ? 'tall portrait' : b.ratio === '1:1' ? 'square' : 'wide 16:9';
+  const items = keys.map((k) => {
+    if (k === 'all') return { id: 'all', for: 'one background shared by the whole piece', topic: b.topic };
+    const s = scenes.find((x) => x.id === k) || {};
+    return { id: k, for: s.title || k, onscreen: s.onscreen, visual: s.visual };
+  });
+  const user = `Write image-generation prompts for BACKGROUND PLATES of an infographic ${b.format === 'static' ? 'page' : 'video'}.
+Topic: ${b.topic || ''}
+Takeaway: ${b.takeaway || ''}
+Audience: ${b.audience || ''} · Tone: ${b.tone || ''}
+Look: ${BG_LOOKS[bg.look] || BG_LOOKS.photo}${bg.notes ? `\nOwner's notes: ${bg.notes}` : ''}
+Palette (the image should sit naturally under it): background ${c.bg}, accent ${c.accent}, secondary ${c.accent2}.
+Frame: ${ratio}.
+
+Rules for every prompt:
+- A concrete, evocative scene or subject that fits the item below (and the culture of the topic, e.g. Korean settings for Korean topics), described for the chosen look.
+- It is a BACKGROUND: text and charts will be laid over it, mostly on the left/center. Keep a calm, low-detail area there; put the main subject toward the right or edges; no busy patterns everywhere.
+- Colour grade toward the palette: dominant tones near the background colour, small touches of the accent.
+- Absolutely NO text, letters, numbers, signs with writing, logos, watermarks, UI, charts or infographic elements.
+- All prompts share one consistent visual style (same lens, lighting and grade) so the scenes feel like one piece.
+- 40 to 80 English words each.
+
+Items:
+${items.map((x) => JSON.stringify(x)).join('\n')}
+
+Return JSON: {"images":[{"id":"...","prompt":"..."}]}`;
+  const r = await json([{ role: 'system', content: 'You are an art director writing prompts for an image model. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, json: true, ...opts });
+  const out = {};
+  for (const x of (r.images || [])) {
+    if (x && x.id && x.prompt) out[String(x.id)] = String(x.prompt).slice(0, 1200) + ' No text, no letters, no numbers, no logos, no watermark.';
+  }
+  return out;
+}
+
 /* ---------- audio tags (ElevenLabs v4 / v3) ---------- */
 
 /**

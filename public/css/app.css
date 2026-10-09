@@ -189,6 +189,8 @@ input[type=color]{width:34px;height:30px;border:1px solid var(--border2);border-
 .insp-head .node-num{width:24px;height:24px}
 .insp-head b{font-size:15px;flex:1}
 .insp-body{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.insp-body>*{flex-shrink:0}
+.insp-body>.seg{align-self:flex-start}
 .direction{border:1px solid var(--border2);border-radius:12px;padding:10px;background:var(--panel2);display:flex;flex-direction:column;gap:8px}
 .direction textarea{min-height:52px;background:var(--bg)}
 .card{border:1px solid var(--border);border-radius:12px;padding:10px;background:rgba(255,255,255,.015);display:flex;flex-direction:column;gap:8px}

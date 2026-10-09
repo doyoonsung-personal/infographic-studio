@@ -20,6 +20,11 @@ const TOOLS = [
     font: { type: 'string', enum: ['sans', 'serif', 'display'] }, motion: { type: 'string', enum: ['calm', 'lively'] }, notes: str(),
   }),
   fn('suggest_palettes', 'Generate 3 palette ideas and show them to the owner as clickable swatches.', { direction: str() }),
+  fn('set_background', 'Background style: mode color (palette only) or image (AI background images); scope scene (one per scene) or single (one shared); look photo|illustration|3d|abstract; notes; strength 0.1-0.9 (how visible the images are).', {
+    mode: { type: 'string', enum: ['color', 'image'] }, scope: { type: 'string', enum: ['scene', 'single'] },
+    look: { type: 'string', enum: ['photo', 'illustration', '3d', 'abstract'] }, notes: str(), strength: { type: 'number' },
+  }),
+  fn('generate_backgrounds', 'PAID (image credits): generate the background images that are missing (or the given scene ids). Shows a confirm button.', { scene_ids: { type: 'array', items: str() } }),
   fn('palette_from_website', 'Build a palette from a brand website\'s colours and apply it. Only when the owner gave a website URL.', { url: str('http(s) URL the owner gave') }, ['url']),
   fn('set_voice', 'Narration settings: enabled, voice_id (one of the available voices), speed 0.7-1.2, model (eleven_v4 / eleven_v3 support emotion tags; switching to them offers the owner to add tags, other models remove tags).', {
     enabled: { type: 'boolean' }, voice_id: str(), speed: { type: 'number' },
@@ -238,6 +243,16 @@ export function mountChat(root, A) {
             h('div', { style: { flex: 1 } }, h('div', { class: 'swatches' }, ['bg', 'surface', 'text', 'accent', 'accent2', 'accent3'].map((k) => h('i', { style: { background: pal.colors[k] } }))), h('div', { class: 'hint' }, pal.why)));
         }));
         return { ok: true, shown: list.map((x) => x.name), note: 'click a swatch to apply' };
+      }
+      case 'set_background': {
+        A.setBackground(a);
+        return { ok: true, note: a.mode || '' };
+      }
+      case 'generate_backgrounds': {
+        if (S.p.style.background.mode !== 'image') A.setBackground({ mode: 'image' });
+        const bs = A.bgStatus();
+        const ids = a.scene_ids && a.scene_ids.length ? a.scene_ids : (bs.missing.length ? bs.missing : bs.keys);
+        return confirmCard(t('bg_generate', { n: ids.length }), ids.join(', '), () => A.generateBackgrounds(ids));
       }
       case 'palette_from_website': {
         const pal = await A.paletteFromSite(a.url);

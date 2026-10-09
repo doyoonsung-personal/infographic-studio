@@ -1,6 +1,7 @@
 // Owner-managed options (voices, music styles, palettes, models). Stored in KV under "config".
 
 import { getJSON, putJSON } from './store.js';
+import { IMAGE_MODELS } from './images.js';
 
 export const TTS_MODELS = ['eleven_multilingual_v2', 'eleven_v3', 'eleven_v4', 'eleven_flash_v2_5', 'eleven_turbo_v2_5'];
 export const MUSIC_MODELS = ['music_v2_5', 'music_v2', 'music_v1'];
@@ -30,6 +31,7 @@ export const DEFAULT_CONFIG = {
     research: 'qwen3.8-flash',
     tts: 'eleven_multilingual_v2',
     music: 'music_v2_5',
+    image: 'qwen-image-3.0',
   },
   defaults: { ratio: '16:9', language: 'ko', format: 'animated', length: 45, paletteId: 'midnight-orange', musicVolume: 0.22 },
 };
@@ -77,6 +79,7 @@ export function sanitizeConfig(c) {
     research: String(m.research || DEFAULT_CONFIG.models.research).slice(0, 60),
     tts: TTS_MODELS.includes(m.tts) ? m.tts : DEFAULT_CONFIG.models.tts,
     music: MUSIC_MODELS.includes(m.music) ? m.music : DEFAULT_CONFIG.models.music,
+    image: IMAGE_MODELS.includes(m.image) ? m.image : DEFAULT_CONFIG.models.image,
   };
   const d = c.defaults || {};
   out.defaults = {

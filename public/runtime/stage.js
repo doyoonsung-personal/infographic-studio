@@ -84,6 +84,41 @@
   var STATIC = TL ? !!TL.static : has(stage, 'data-static');
   var DURATION = STATIC ? 0 : (TL && TL.duration) || cursor;
 
+  /* ---------- background images (optional) ---------- */
+  // CFG.images = {sceneId | 'all': url}. Each scene gets a full-bleed image layer (slow zoom) under a
+  // colour scrim in var(--bg) so text stays readable. A composition can place the image itself by
+  // adding an element with [data-bg-slot]; then only that element receives the image.
+  var IMAGES = CFG.images || {};
+  var bgStrength = clamp(num(CFG.bg && CFG.bg.strength, 0.45), 0.05, 0.95);
+  sceneEls.forEach(function (el, i) {
+    var id = attr(el, 'data-scene') || ('s' + (i + 1));
+    var url = IMAGES[id] || IMAGES.all;
+    if (!url) return;
+    var css = 'url("' + String(url).replace(/"/g, '%22') + '")';
+    root.style.setProperty('--bg-img-' + id, css);
+    var slot = el.querySelector('[data-bg-slot]');
+    if (slot) {
+      slot.style.backgroundImage = css;
+      if (!slot.style.backgroundSize) slot.style.backgroundSize = 'cover';
+      if (!slot.style.backgroundPosition) slot.style.backgroundPosition = 'center';
+      return;
+    }
+    var img = document.createElement('div');
+    img.className = '__bgimg';
+    img.setAttribute('data-a', 'none');
+    img.setAttribute('data-ken', '1.07');
+    img.style.cssText = 'position:absolute;inset:0;z-index:-1;pointer-events:none;background-position:center;background-size:cover;background-repeat:no-repeat;transform-origin:60% 50%';
+    img.style.backgroundImage = css;
+    var scrim = document.createElement('div');
+    scrim.className = '__scrim';
+    var a = Math.round((1 - bgStrength) * 100);
+    scrim.style.cssText = 'position:absolute;inset:0;z-index:-1;pointer-events:none;' +
+      'background:linear-gradient(100deg, color-mix(in srgb, var(--bg) ' + Math.min(100, a + 12) + '%, transparent) 0%, ' +
+      'color-mix(in srgb, var(--bg) ' + a + '%, transparent) 55%, color-mix(in srgb, var(--bg) ' + Math.max(0, a - 10) + '%, transparent) 100%)';
+    el.insertBefore(scrim, el.firstChild);
+    el.insertBefore(img, el.firstChild);
+  });
+
   /* ---------- per-element animation specs ---------- */
   var ANIM_SEL = '[data-in],[data-cue],[data-a],[data-grow],[data-count],[data-draw],[data-type],[data-loop],[data-ken],[data-out],[data-out-cue]';
 

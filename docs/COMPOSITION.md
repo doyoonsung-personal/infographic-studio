@@ -57,6 +57,21 @@ Rules for the fragment:
 - Static jobs: one `<section class="scene" data-scene="page">`. Motion attributes resolve to their final
   state, so you can still use them, but nothing moves.
 
+## Background images
+
+When BRIEF.md says background images are on, the stage inserts, as the first children of each scene, a
+full-bleed image layer (with a slow zoom) and a scrim in `var(--bg)` that keeps text readable. You don't
+need to do anything for that, but:
+
+- Don't give scenes (or full-scene wrappers) an opaque background; it would hide the image.
+- Put dense text and charts on cards: `background: color-mix(in srgb, var(--surface) 82%, transparent)`,
+  optionally `backdrop-filter: blur(6px)`.
+- To place the image yourself (a framed photo, a split layout), add an element with `data-bg-slot` inside
+  the scene; it receives the image (`background-size: cover`) and the automatic layers are skipped. The
+  image is also available as `var(--bg-img-<sceneId>)`.
+- Without background images, scenes are plain `var(--bg)`: build richness with shapes, gradients and
+  illustrations instead.
+
 ## Animation attributes
 
 All times are **seconds from the start of the scene**.
