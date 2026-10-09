@@ -216,7 +216,7 @@ const RENDER = {
               h('input', { type: 'text', value: a.name || '', placeholder: t('asset_name'), style: { flex: 1, padding: '4px 8px' }, oninput: (e) => A.updateAsset(a.id, { name: e.target.value, _typing: true }) }),
               h('code', { class: 'mono', title: t('asset_id_hint'), style: { fontSize: '10.5px', color: 'var(--faint)' } }, a.id)),
             h('textarea', { rows: 2, placeholder: t('asset_subject'), oninput: (e) => A.updateAsset(a.id, { subject: e.target.value, _typing: true }) }, a.subject || ''),
-            a.error ? h('div', { class: 'err' }, a.error) : null),
+            a.error ? h('div', { class: 'err' }, /green net|content filter/i.test(a.error) ? t('content_blocked') : a.error) : null),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
             h('button', { class: 'btn xs icon', title: a.blobId ? t('regen') : t('generate'), disabled: A.S.busy.assets || !a.subject, onclick: () => A.generateAssets([a.id]).catch(() => {}) }, icon(a.blobId ? 'refresh' : 'scissors')),
             h('button', { class: 'btn xs icon ghost', title: t('remove'), onclick: () => A.removeAsset(a.id) }, icon('trash')))));

@@ -212,6 +212,24 @@ export async function openStudio(root, projectId, app) {
     progressRaf = requestAnimationFrame(() => renderNode(key));
   }
 
+  /**
+   * Generate one image. When Model Studio's content filter blocks the picture, try once more with a
+   * neutral-content note; if that is blocked too, explain what the filter refuses.
+   */
+  async function genImage(prompt, ratio) {
+    try {
+      return await api('image', { method: 'POST', body: { prompt, ratio } });
+    } catch (e) {
+      if (!(e.data && e.data.code === 'content_blocked')) throw e;
+      try {
+        return await api('image', { method: 'POST', body: { prompt: prompt + ' ' + ai.SAFE_RETRY, ratio } });
+      } catch (e2) {
+        if (e2.data && e2.data.code === 'content_blocked') throw new Error(t('content_blocked'));
+        throw e2;
+      }
+    }
+  }
+
   /* ---------- history ---------- */
   function pushHistory(key, value) {
     const list = S.p.history[key] || (S.p.history[key] = []);
@@ -365,7 +383,7 @@ export async function openStudio(root, projectId, app) {
           progress('style', `🖼 ${n + 1}/${targets.length}`);
           const prompt = prompts[k];
           if (!prompt) continue;
-          const r = await api('image', { method: 'POST', body: { prompt, ratio: S.p.brief.ratio } });
+          const r = await genImage(prompt, S.p.brief.ratio);
           const small = await compressImage(r.blobId).catch(() => null);
           bg.images = bg.images || {};
           bg.images[k] = { blobId: small || r.blobId, original: r.blobId, prompt, model: r.model, at: Date.now() };
@@ -440,7 +458,7 @@ export async function openStudio(root, projectId, app) {
         for (const a of items) {
           progress('assets', `✂ ${n + failed.length + 1}/${items.length}`);
           try {
-            const r = await api('image', { method: 'POST', body: { prompt: ai.cutoutPrompt(a.subject, S.p.assets.style), ratio: '1:1' } });
+            const r = await genImage(ai.cutoutPrompt(a.subject, S.p.assets.style), '1:1');
             const src = await (await fetch(blobUrl(r.blobId), { credentials: 'same-origin' })).blob();
             const cut = await makeCutout(src);
             if (!cut.blob || cut.coverage < 0.01 || cut.coverage > 0.95) throw new Error(t('cutout_failed'));
@@ -489,7 +507,7 @@ export async function openStudio(root, projectId, app) {
                 changed({ inspector: S.sel === 'style', preview: true });
                 return;
               }
-              if (r.status === 'FAILED') throw new Error(r.error || 'failed');
+              if (r.status === 'FAILED') throw new Error(r.code === 'content_blocked' ? t('content_blocked') : (r.error || 'failed'));
             }
             throw new Error('timed out');
           } catch (e) {

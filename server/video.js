@@ -4,6 +4,7 @@
 
 import { fail } from './http.js';
 import { getJSON, putJSON, putBlob, getBlob, MAX_BLOB } from './store.js';
+import { isContentBlock } from './images.js';
 
 export const VIDEO_MODELS = {
   'happyhorse-1.1-i2v': { min: 3, max: 15, res: ['480P', '720P', '1080P'] },
@@ -62,7 +63,8 @@ export async function poll(env, taskId) {
   const o = d.output || {};
   const status = o.task_status || (r.ok ? 'UNKNOWN' : 'FAILED');
   if (status === 'FAILED' || status === 'CANCELED' || status === 'UNKNOWN') {
-    return { status: 'FAILED', error: `${o.code || r.status}: ${o.message || d.message || 'video task failed'}`.slice(0, 400) };
+    const msg = `${o.code || r.status}: ${o.message || d.message || 'video task failed'}`.slice(0, 400);
+    return { status: 'FAILED', error: msg, code: isContentBlock(o, msg) ? 'content_blocked' : undefined };
   }
   if (status !== 'SUCCEEDED') return { status };
   if (!o.video_url) return { status: 'FAILED', error: 'the video model returned no video' };

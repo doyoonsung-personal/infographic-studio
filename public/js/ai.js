@@ -162,10 +162,28 @@ export const CUTOUT_STYLES = {
   paper: 'A hand-made construction-paper craft illustration made of layered coloured paper shapes',
 };
 
+/*
+ * Model Studio's content filter ("Green net") rejects finished pictures that show China's borders
+ * (any map or globe with Asia visible: AI maps don't match the official borders), Chinese banknotes,
+ * flags and real political figures. Verified 2026-10-09: "globe showing Asia" and "100 yuan notes" are
+ * blocked; a plain globe (drawn Atlantic-side) and generic money pass.
+ */
+const SAFE_HINTS = [
+  [/globe|world ?map|\bmaps?\b|atlas|continent|\bearth\b|지구|지도|세계/i, 'If it is a globe or a map: show only the Atlantic Ocean side with the Americas, Europe and Africa, no Asia, no country borders, no labels.'],
+  [/yuan|rmb|renminbi|banknote|bank note|paper money|\bcash\b|\bbills?\b|currency|money|위안|지폐|현금|돈/i, 'Any money is generic fictional paper money or plain gold coins: no portraits, no national emblems, no real currency.'],
+  [/flag|국기/i, 'No national flags: use a plain coloured pennant instead.'],
+];
+export const SAFE_RETRY = 'Keep it neutral: no maps or globes showing Asia, no country borders, no flags, no real currency, no real people, no political or military symbols.';
+
+function safeHints(text) {
+  return SAFE_HINTS.filter(([re]) => re.test(text)).map(([, hint]) => hint).join(' ');
+}
+
 /** Image prompt for one cut-out: the subject alone, with a white paper border, on flat green for keying. */
 export function cutoutPrompt(subject, style) {
+  const hints = safeHints(subject);
   // The style goes first so it wins over colours named in the subject.
-  return `${CUTOUT_STYLES[style] || CUTOUT_STYLES.halftone} of: ${String(subject || '').trim()}. The photo is hand-cut out with scissors along its silhouette, ` +
+  return `${CUTOUT_STYLES[style] || CUTOUT_STYLES.halftone} of: ${String(subject || '').trim()}.${hints ? ' ' + hints : ''} The photo is hand-cut out with scissors along its silhouette, ` +
     'with a clean thick white paper border all around the cut edge. One single isolated subject, centered, the whole subject visible with empty margin around it. ' +
     'Placed on a perfectly flat, solid pure green (#00FF00) background, even lighting, no shadow on the background, no other objects. ' +
     'No text, no letters, no numbers, no logos, no watermark.';
@@ -191,6 +209,7 @@ Rules:
 - 1 to 3 cut-outs per scene (fewer is fine), at most 18 in total. Reuse is not needed; each item is one picture.
 - Each is ONE concrete, photographable subject that can be cut out along its outline: an object, a device, a vehicle, a single building or landmark, a generic person or hands, an animal, a plant. Never a wide view, a street, a landscape, a room or a crowd; no abstract ideas, charts, screenshots or text.
 - No real, identifiable people and no brand logos or trademarks. Prefer subjects that fit the topic's country and era.
+- The image service's content filter rejects: maps or globes that show Asia or any country borders (a globe must face the Atlantic), Chinese banknotes or any real currency (use generic money or plain gold coins), national flags, real politicians, military symbols. Plan around these.
 - "subject": 8 to 25 English words describing ONLY the subject itself (what it is, angle, key details, colours). Never describe a background, surroundings, ground, setting or lighting: it will be cut out.
 - "name": a 2–6 word label in ${lang}.
 
@@ -240,6 +259,7 @@ Rules for every prompt:
 - It is a BACKGROUND: text and charts will be laid over it, mostly on the left/center. Keep a calm, low-detail area there; put the main subject toward the right or edges; no busy patterns everywhere.
 - Colour grade toward the palette: dominant tones near the background colour, small touches of the accent.
 - Absolutely NO text, letters, numbers, signs with writing, logos, watermarks, UI, charts or infographic elements.
+- The image service's content filter rejects maps or globes showing Asia or country borders, real currency (especially Chinese banknotes), national flags, real politicians and military symbols: never ask for them.
 - All prompts share one consistent visual style (same lens, lighting and grade) so the scenes feel like one piece.
 - 40 to 80 English words each.
 

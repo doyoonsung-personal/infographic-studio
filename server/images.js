@@ -7,6 +7,11 @@ export const IMAGE_MODELS = ['qwen-image-3.0', 'qwen-image-3.0-pro', 'qwen-image
 // Close to each stage ratio, multiples of 16, inside both models' allowed pixel areas.
 export const SIZE_FOR_RATIO = { '16:9': '1664*928', '9:16': '928*1664', '1:1': '1328*1328', '4:5': '1104*1376', 'a4': '1088*1536' };
 
+/** A refusal by Model Studio's content moderation ("Green net" / DataInspectionFailed). */
+export function isContentBlock(d, msg) {
+  return /DataInspectionFailed|IPInfringement/i.test((d && d.code) || '') || /green net|inappropriate content|data inspection/i.test(msg || '');
+}
+
 function findImageUrl(d) {
   const content = d && d.output && d.output.choices && d.output.choices[0] && d.output.choices[0].message && d.output.choices[0].message.content;
   if (Array.isArray(content)) { const hit = content.find((c) => c.image); if (hit) return hit.image; }
@@ -32,7 +37,10 @@ export async function generate(env, body, config) {
   const text = await r.text();
   let d = {};
   try { d = JSON.parse(text); } catch {}
-  if (!r.ok) fail(r.status === 429 ? 429 : 502, `Image model ${r.status}: ${(d.message || d.code || text).toString().slice(0, 400)}`);
+  const msg = (d.message || d.code || text).toString().slice(0, 400);
+  // Alibaba's content filter ("Green net") checks the prompt and the finished picture.
+  if (isContentBlock(d, msg)) fail(422, `Image model: content filter blocked the ${/output/i.test(msg) ? 'generated picture' : 'prompt'} (${msg})`, { code: 'content_blocked', stage: /output/i.test(msg) ? 'output' : 'input' });
+  if (!r.ok) fail(r.status === 429 ? 429 : 502, `Image model ${r.status}: ${msg}`);
   const url = findImageUrl(d);
   if (!url) fail(502, 'The image model returned no image');
   const img = await fetch(url);
