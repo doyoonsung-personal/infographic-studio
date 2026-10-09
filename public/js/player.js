@@ -177,12 +177,18 @@ export class Player {
     this.scrub.querySelector('.fill').style.width = (p * 100) + '%';
     this.scrub.querySelector('.knob').style.left = (p * 100) + '%';
     this.tc.textContent = `${fmtTime(this.t)} / ${fmtTime(this.duration)}`;
-    this.playBtn.replaceChildren(icon(this.playing ? 'pause' : 'play'));
+    // Swap the icon only when the state changes: replacing it every frame swallowed clicks on the button.
+    if (this.iconState !== this.playing) {
+      this.iconState = this.playing;
+      this.playBtn.replaceChildren(icon(this.playing ? 'pause' : 'play'));
+      this.playBtn.title = tr(this.playing ? 'pause' : 'play');
+    }
     this.emit('time', this.t);
   }
 
   async play() {
     if (this.static || !this.duration || this.playing) return;
+    stopAudio();
     if (!this.hasPlayed) { this.hasPlayed = true; this.t = 0; }
     if (this.t >= this.duration - 0.05) this.t = 0;
     this.playing = true;
@@ -274,13 +280,62 @@ export class Player {
   }
 }
 
-/** Play one audio blob (voice preview etc.); returns a stop function. */
-let current = null;
-export function playOne(url, onEnd) {
-  if (current) { current.pause(); current = null; }
-  const a = new Audio(url);
-  a.onended = () => { current = null; onEnd && onEnd(); };
-  a.play().catch(() => onEnd && onEnd());
-  current = a;
-  return () => { a.pause(); current = null; onEnd && onEnd(); };
+/* ---------- one-off audio (voice samples, narration clips, music) ---------- */
+
+let current = null; // { audio, btn }
+
+function setButton(btn, playing) {
+  const svg = btn.querySelector('svg');
+  if (svg) svg.replaceWith(icon(playing ? 'pause' : 'play'));
+  const lbl = btn.querySelector('[data-lbl]');
+  if (lbl) lbl.textContent = tr(playing ? 'pause' : 'play');
+  btn.classList.toggle('on', playing);
+  btn.title = tr(playing ? 'pause' : 'play');
+}
+
+/** Stop whatever one-off audio is playing (and reset its button). */
+export function stopAudio() {
+  if (!current) return;
+  const { audio, btn } = current;
+  current = null;
+  audio.pause();
+  if (btn) setButton(btn, false);
+}
+
+/**
+ * A play/pause toggle for one audio URL. Only one plays at a time; starting another stops the first.
+ * label: 'auto' shows 재생/일시정지 text, any other string is shown as is, omitted = icon only.
+ */
+export function audioButton(url, { cls = 'btn xs icon', label } = {}) {
+  const kids = [icon('play')];
+  if (label === 'auto') kids.push(h('span', { 'data-lbl': '' }, tr('play')));
+  else if (label) kids.push(label);
+  const btn = h('button', { class: cls, title: tr('play') }, kids);
+  // The panel may re-render while something plays: the new button takes over the running audio.
+  if (current && current.url === url) {
+    current.btn = btn;
+    setButton(btn, !current.audio.paused);
+  }
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (current && (current.btn === btn || current.url === url)) {
+      current.btn = btn;
+      // Same button: pause, keeping the position so the next press resumes.
+      const { audio } = current;
+      if (audio.paused) { audio.play().catch(() => {}); setButton(btn, true); }
+      else { audio.pause(); setButton(btn, false); }
+      return;
+    }
+    stopAudio();
+    const audio = new Audio(url);
+    current = { audio, btn, url };
+    audio.onended = () => {
+      const b = current && current.audio === audio ? current.btn : btn;
+      if (current && current.audio === audio) current = null;
+      setButton(b, false);
+    };
+    audio.play().then(() => setButton(current && current.audio === audio ? current.btn : btn, true))
+      .catch(() => { if (current && current.audio === audio) current = null; setButton(btn, false); });
+  });
+  return btn;
 }

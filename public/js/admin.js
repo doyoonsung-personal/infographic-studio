@@ -4,7 +4,7 @@
 import { api } from './api.js';
 import { h, icon, clone, COLOR_KEYS } from './util.js';
 import { t } from './i18n.js';
-import { playOne } from './player.js';
+import { audioButton } from './player.js';
 
 const TTS_MODELS = ['', 'eleven_multilingual_v2', 'eleven_v3', 'eleven_v4', 'eleven_flash_v2_5', 'eleven_turbo_v2_5'];
 const MUSIC_MODELS = ['music_v2_5', 'music_v2', 'music_v1'];
@@ -122,7 +122,7 @@ export async function openAdmin(root, app) {
       h('td', { style: { width: '70px' } }, inp(v, 'language', { placeholder: 'ko' })),
       h('td', {}, inp(v, 'note')),
       h('td', { style: { whiteSpace: 'nowrap' } },
-        v.previewUrl ? h('button', { class: 'btn xs icon', onclick: () => playOne(v.previewUrl) }, icon('play')) : null,
+        v.previewUrl ? audioButton(v.previewUrl) : null,
         h('button', { class: 'btn xs icon ghost', onclick: () => { cfg.voices.splice(i, 1); render(); } }, icon('trash')))));
     const importBox = h('div', { hidden: true, class: 'card' });
     const importBtn = h('button', { class: 'btn', disabled: !me.configured.eleven }, icon('download'), t('import_voices'));
@@ -140,7 +140,7 @@ export async function openAdmin(root, app) {
             return h('div', { class: 'clip' },
               h('b', { style: { minWidth: '140px' } }, v.name),
               h('span', { class: 'txt' }, [v.category, v.gender, v.age, v.accent, v.languages.join('/'), v.description, v.useCase].filter(Boolean).join(' · ')),
-              v.previewUrl ? h('button', { class: 'btn xs icon', onclick: () => playOne(v.previewUrl) }, icon('play')) : null,
+              v.previewUrl ? audioButton(v.previewUrl) : null,
               h('button', { class: 'btn xs', disabled: added, onclick: () => {
                 cfg.voices.push({ id: slugId(v.name, cfg.voices), name: v.name, voiceId: v.voiceId, modelId: '', language: v.languages[0] || '', note: [v.gender, v.description].filter(Boolean).join(', '), previewUrl: v.previewUrl });
                 render();

@@ -46,6 +46,7 @@ svg.i{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-widt
 /* ---------- buttons ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 13px;border-radius:9px;border:1px solid var(--border2);background:var(--panel2);cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;transition:background .15s,border-color .15s,opacity .15s;text-decoration:none;color:var(--text)}
 .btn:hover:not(:disabled){background:var(--panel3);border-color:#46506a}
+.btn svg,.btn span{pointer-events:none}
 .btn:disabled{opacity:.42;cursor:not-allowed}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.primary:hover:not(:disabled){background:#ff7d1f;border-color:#ff7d1f}

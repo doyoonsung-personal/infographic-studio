@@ -12,7 +12,7 @@ const TTS_CHOICES = [
   ['eleven_flash_v2_5', 'Flash v2.5'],
   ['eleven_turbo_v2_5', 'Turbo v2.5'],
 ];
-import { playOne } from './player.js';
+import { audioButton } from './player.js';
 import { NODES } from './studio.js';
 import { scorePalette } from './ai.js';
 
@@ -194,7 +194,7 @@ const RENDER = {
     body.append(field(t('voice_pick'), h('div', { class: 'row' },
       h('select', { class: 'grow', onchange: (e) => A.setVoice({ voiceRef: e.target.value }) },
         voices.map((x) => h('option', { value: x.id, selected: x.id === v.voiceRef }, `${x.name}${x.language ? ' · ' + x.language : ''}${x.note ? ' — ' + x.note : ''}`))),
-      vd && vd.previewUrl ? h('button', { class: 'btn sm', onclick: () => playOne(vd.previewUrl) }, icon('play'), t('preview')) : null)));
+      vd && vd.previewUrl ? audioButton(vd.previewUrl, { cls: 'btn sm', label: t('preview') }) : null)));
     const model = A.ttsModel();
     const tagModel = TAG_MODELS.includes(model);
     body.append(field(t('tts_model_pick'), h('select', { onchange: (e) => A.setVoiceModel(e.target.value).catch(() => {}) },
@@ -229,7 +229,7 @@ const RENDER = {
         h('span', { class: 'sid' }, s.id),
         h('span', { class: 'txt', title: said }, said),
         running ? h('span', { class: 'pill s-running' }, '…') : h('span', { class: 'pill ' + (fresh ? 's-done' : c ? 's-stale' : '') }, fresh ? t('clip_ok', { d: c.duration.toFixed(1) }) : c ? t('clip_stale') : t('clip_missing')),
-        c ? h('button', { class: 'btn xs icon', title: t('play'), onclick: () => playOne(blobUrl(c.blobId)) }, icon('play')) : null,
+        c ? audioButton(blobUrl(c.blobId)) : null,
         h('button', { class: 'btn xs icon', title: t('regen'), disabled: A.S.busy.voice, onclick: () => A.generateVoice([s.id]).catch(() => {}) }, icon('refresh'))));
     }
   },
@@ -250,7 +250,7 @@ const RENDER = {
     if (ms === 'stale') body.append(h('div', { class: 'warnbox' }, t('music_stale')));
     body.append(h('div', { class: 'row wrap' },
       busyBtn(A, 'music', ms === 'missing' ? t('gen_music') : t('regen'), () => A.generateMusic(), 'btn primary', 'music'),
-      m.track ? h('button', { class: 'btn', onclick: () => playOne(blobUrl(m.track.blobId)) }, icon('play'), t('play')) : null));
+      m.track ? audioButton(blobUrl(m.track.blobId), { cls: 'btn', label: 'auto' }) : null));
     body.append(h('div', { class: 'hint' }, t('paid_note')));
   },
 
