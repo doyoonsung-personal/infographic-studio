@@ -3,7 +3,15 @@
 import { h, icon, fmtTime, fmtDate, contrast, COLOR_KEYS } from './util.js';
 import { t } from './i18n.js';
 import { blobUrl } from './api.js';
-import { spokenText } from './timeline.js';
+import { spokenText, TAG_MODELS } from './timeline.js';
+
+const TTS_CHOICES = [
+  ['eleven_v4', 'Eleven v4'],
+  ['eleven_v3', 'Eleven v3'],
+  ['eleven_multilingual_v2', 'Multilingual v2'],
+  ['eleven_flash_v2_5', 'Flash v2.5'],
+  ['eleven_turbo_v2_5', 'Turbo v2.5'],
+];
 import { playOne } from './player.js';
 import { NODES } from './studio.js';
 import { scorePalette } from './ai.js';
@@ -186,6 +194,23 @@ const RENDER = {
       h('select', { class: 'grow', onchange: (e) => A.setVoice({ voiceRef: e.target.value }) },
         voices.map((x) => h('option', { value: x.id, selected: x.id === v.voiceRef }, `${x.name}${x.language ? ' · ' + x.language : ''}${x.note ? ' — ' + x.note : ''}`))),
       vd && vd.previewUrl ? h('button', { class: 'btn sm', onclick: () => playOne(vd.previewUrl) }, icon('play'), t('preview')) : null)));
+    const model = A.ttsModel();
+    const tagModel = TAG_MODELS.includes(model);
+    body.append(field(t('tts_model_pick'), h('select', { onchange: (e) => A.setVoiceModel(e.target.value).catch(() => {}) },
+      TTS_CHOICES.map(([id, label]) => h('option', { value: id, selected: id === model }, label + (TAG_MODELS.includes(id) ? ' · ' + t('tags_short') : ''))))));
+    if (tagModel) {
+      const tagged = A.tagsInScript();
+      body.append(h('div', { class: 'card' },
+        h('div', { class: 'hint' }, tagged ? t('tags_on') : t('tags_available')),
+        h('div', { class: 'row wrap' }, h('span', { class: 'grow' }),
+          tagged ? h('button', { class: 'btn sm ghost', disabled: A.S.busy.voice, onclick: () => A.removeAudioTags() }, icon('trash'), t('tags_clear')) : null,
+          busyBtn(A, 'voice', tagged ? t('tags_redo') : t('tags_apply'), async () => {
+            const r = await A.app.dialog({ title: t('tags_title'), body: t('tags_body'), input: t('tags_dir_ph'), ok: t('tags_apply'), cancel: t('cancel') });
+            if (!r) return;
+            if (tagged) A.removeAudioTags();
+            await A.addAudioTags(r.value);
+          }, 'btn sm', 'wand'))));
+    }
     const sp = h('span', { class: 'tag' }, '×' + (v.speed || 1));
     body.append(field(t('speed'), h('div', { class: 'row' }, h('input', { type: 'range', min: 0.7, max: 1.2, step: 0.05, value: v.speed || 1, class: 'grow', oninput: (e) => { sp.textContent = '×' + e.target.value; }, onchange: (e) => A.setVoice({ speed: e.target.value }) }), sp)));
     const vs = A.voiceStatus();

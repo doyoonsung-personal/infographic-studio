@@ -1,6 +1,7 @@
 // Writes work/<job>/BRIEF.md: everything Claude needs to design the composition, in one readable page.
 
 import { FONT_STACKS } from '../../public/js/assemble.js';
+import { stripTags } from '../../public/js/timeline.js';
 
 const LANG = { ko: 'Korean (한국어)', en: 'English' };
 const RATIO_NOTE = {
@@ -77,7 +78,8 @@ export function writeBrief({ job, project, timeline: tl, hasPrevious }) {
     tl.scenes.forEach((s, i) => {
       const sc = scenes[i] || {};
       const cues = Object.entries(s.cues || {}).map(([k, v]) => `${k}@${v}`).join(' ');
-      L.push(`| ${s.id} | ${s.start} | ${s.end} | ${s.len} | ${cues} | ${cell(sc.narration)} | ${cell(sc.onscreen)} | ${cell(sc.visual)} |`);
+      // Voice-acting tags ([warmly] …) are for the narrator, not the designer.
+      L.push(`| ${s.id} | ${s.start} | ${s.end} | ${s.len} | ${cues} | ${cell(stripTags(sc.narration || ''))} | ${cell(sc.onscreen)} | ${cell(sc.visual)} |`);
     });
   } else {
     L.push('');

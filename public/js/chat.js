@@ -21,7 +21,10 @@ const TOOLS = [
   }),
   fn('suggest_palettes', 'Generate 3 palette ideas and show them to the owner as clickable swatches.', { direction: str() }),
   fn('palette_from_website', 'Build a palette from a brand website\'s colours and apply it. Only when the owner gave a website URL.', { url: str('http(s) URL the owner gave') }, ['url']),
-  fn('set_voice', 'Narration settings: enabled, voice_id (one of the available voices), speed 0.7-1.2.', { enabled: { type: 'boolean' }, voice_id: str(), speed: { type: 'number' } }),
+  fn('set_voice', 'Narration settings: enabled, voice_id (one of the available voices), speed 0.7-1.2, model (eleven_v4 / eleven_v3 support emotion tags; switching to them offers the owner to add tags, other models remove tags).', {
+    enabled: { type: 'boolean' }, voice_id: str(), speed: { type: 'number' },
+    model: { type: 'string', enum: ['eleven_v4', 'eleven_v3', 'eleven_multilingual_v2', 'eleven_flash_v2_5', 'eleven_turbo_v2_5'] },
+  }),
   fn('generate_voice', 'PAID (ElevenLabs credits): generate narration audio. Shows a confirm button to the owner.', { scene_ids: { type: 'array', items: str() }, only_missing: { type: 'boolean' } }),
   fn('set_music', 'Music settings: enabled, style_id (one of the music styles), custom prompt, volume 0-1.', { enabled: { type: 'boolean' }, style_id: str(), prompt: str(), volume: { type: 'number' } }),
   fn('generate_music', 'PAID (ElevenLabs credits): generate the music track. Shows a confirm button to the owner.', {}),
@@ -249,7 +252,8 @@ export function mountChat(root, A) {
         }
         if (a.speed) patch.speed = a.speed;
         A.setVoice(patch);
-        return { ok: true };
+        if (a.model) await A.setVoiceModel(a.model);
+        return { ok: true, note: a.model || undefined };
       }
       case 'generate_voice': {
         const vs = A.voiceStatus();

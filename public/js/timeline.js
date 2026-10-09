@@ -46,9 +46,24 @@ export function parseNarration(narration = '') {
   return { text, cues };
 }
 
-/** Narration with cue markers removed: what the voice actually reads. */
+/** Narration with cue markers removed: what is sent to the voice (audio tags included). */
 export function spokenText(narration = '') {
   return parseNarration(narration).text;
+}
+
+/* ---------- ElevenLabs audio tags ([excited], [short pause] …) ---------- */
+
+/** Models that perform audio tags; every other model would read the brackets aloud. */
+export const TAG_MODELS = ['eleven_v4', 'eleven_v3'];
+const TAG_RE = /\[[^\[\]{}\n]{1,40}\]\s*/g;
+
+export function hasTags(narration = '') {
+  return /\[[^\[\]{}\n]{1,40}\]/.test(String(narration));
+}
+
+/** Remove audio tags, keeping words, punctuation and {n} cue markers. */
+export function stripTags(narration = '') {
+  return String(narration).replace(TAG_RE, '').replace(/[ \t]{2,}/g, ' ').replace(/^[ \t]+|[ \t]+$/gm, '');
 }
 
 /** Cue markers as {n: charIndex} positions inside spokenText(narration). */
@@ -58,7 +73,7 @@ export function cueOffsets(narration = '') {
 
 /** Rough reading time when there is no narration audio. */
 export function estimateSeconds(text = '', lang = 'ko') {
-  const t = spokenText(text);
+  const t = spokenText(stripTags(text));
   if (!t) return 0;
   if (lang === 'ko' || /[가-힣]/.test(t)) {
     const syllables = (t.match(/[가-힣]/g) || []).length + (t.match(/[A-Za-z0-9]+/g) || []).length;
@@ -69,11 +84,16 @@ export function estimateSeconds(text = '', lang = 'ko') {
 
 /** Map cue char offsets to seconds using ElevenLabs character alignment. */
 export function cueTimes(narration, alignment) {
-  const offsets = cueOffsets(narration);
   const out = {};
   if (!alignment || !alignment.starts || !alignment.starts.length) return out;
-  const spoken = spokenText(narration);
   const n = alignment.starts.length;
+  // The alignment may or may not include audio-tag characters; use whichever text it matches.
+  let offsets = cueOffsets(narration);
+  let spoken = spokenText(narration);
+  if (n !== spoken.length && hasTags(narration)) {
+    const bare = stripTags(narration);
+    if (spokenText(bare).length === n) { offsets = cueOffsets(bare); spoken = spokenText(bare); }
+  }
   for (const [k, idx] of Object.entries(offsets)) {
     // Alignment characters should match the spoken text 1:1; fall back to proportional mapping.
     let i = n === spoken.length ? idx : Math.round((idx / Math.max(1, spoken.length)) * n);
@@ -91,6 +111,14 @@ export function clipKey(narration, voiceRef, speed = 1) {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return (h >>> 0).toString(36);
+}
+
+/** Is a narration clip still valid for this scene's text, voice, speed and (if chosen) model? */
+export function clipFresh(clip, narration, voice) {
+  if (!clip) return false;
+  if (clip.key !== clipKey(narration, voice.voiceRef, voice.speed || 1)) return false;
+  if (voice.modelId && clip.modelId && clip.modelId !== voice.modelId) return false;
+  return true;
 }
 
 /**
@@ -117,7 +145,7 @@ export function computeTimeline(project) {
 
   scenes.forEach((sc, i) => {
     const clip = useVoice && voice.clips ? voice.clips[sc.id] : null;
-    const fresh = clip && clip.key === clipKey(sc.narration, voice.voiceRef, voice.speed || 1);
+    const fresh = clipFresh(clip, sc.narration, voice);
     let len;
     let cues = {};
     let v = null;

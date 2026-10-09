@@ -144,6 +144,49 @@ function normScene(s, id) {
   };
 }
 
+/* ---------- audio tags (ElevenLabs v4 / v3) ---------- */
+
+/**
+ * Insert emotion / delivery tags into each scene's narration. Returns {sceneId: taggedNarration}.
+ * The caller checks that only tags were inserted (words and {n} cue markers unchanged).
+ */
+export async function addAudioTags(p, direction, opts) {
+  const scenes = ((p.script && p.script.scenes) || []).filter((s) => String(s.narration || '').trim());
+  if (!scenes.length) return {};
+  const b = p.brief || {};
+  const user = `You direct a voice actor for an infographic narration (language: ${langOf(p)}).
+Topic: ${b.topic || ''}
+Takeaway: ${b.takeaway || ''}
+Audience: ${b.audience || ''}
+Tone: ${b.tone || ''}${direction ? `\nOwner's direction for the delivery: ${direction}` : ''}
+
+Add ElevenLabs audio tags to the narration below. Rules:
+- A tag is a few plain English words in square brackets placed right BEFORE the words it colours, e.g. [warmly], [excited], [curious], [confident], [softly], [slowly], [dramatically], [surprised], [short pause], [pause], [sighs], [chuckles].
+- Tags describe HOW the line is spoken (emotion, delivery, pauses, small non-verbal sounds). No stage directions ([smiling], [pointing]), no sound effects, accents or singing.
+- A tag holds until the next one, so add 1 to 3 tags per scene, only where the delivery should change. Keep it natural for a clear, trustworthy explainer; save stronger emotions for the hook, surprising numbers and the ending.
+- A [short pause] before a key number or the takeaway works well.
+- One idea per tag, no commas inside a tag. To combine, stack separate tags: [short pause] [warmly].
+- When a tag belongs at a {n} cue marker, put the tag BEFORE the marker: "[short pause] {1}824만", not "{1}[short pause] 824만".
+- Do NOT change, add, remove or reorder any word, number, punctuation, or the {1} {2} cue markers. Only insert tags. Tags are always in English, even in Korean text.
+
+Scenes:
+${scenes.map((s) => JSON.stringify({ id: s.id, narration: s.narration })).join('\n')}
+
+Return JSON: {"scenes":[{"id":"s1","narration":"the same text with tags inserted"}]}`;
+  const r = await json([{ role: 'system', content: 'You are an expert voice director. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, json: true, ...opts });
+  const out = {};
+  for (const s of (r.scenes || [])) if (s && s.id && typeof s.narration === 'string') out[String(s.id)] = tidyTags(s.narration.slice(0, 1600));
+  return out;
+}
+
+/** "[a, b]" -> "[a] [b]"; tags right after a {n} cue move in front of it so the cue stays on the word. */
+export function tidyTags(text) {
+  let s = String(text).replace(/\[([^\[\]{}\n]{1,60})\]/g, (m, inner) =>
+    inner.includes(',') ? inner.split(',').map((x) => x.trim()).filter(Boolean).map((x) => `[${x}]`).join(' ') : m);
+  s = s.replace(/(\{\d+\})\s*((?:\[[^\[\]{}\n]{1,40}\]\s*)+)/g, (m, cue, tags) => `${tags.trim()} ${cue}`);
+  return s.replace(/(\[[^\[\]{}\n]{1,40}\])(?=[^\s\[])/g, '$1 ').replace(/[ \t]{2,}/g, ' ').trim();
+}
+
 /* ---------- palettes ---------- */
 const PALETTE_RULES = `Each palette has colors {bg, surface, text, muted, accent, accent2, accent3} as #rrggbb:
 - text on bg contrast at least 7:1; muted on bg at least 4.5:1; accent readable as large text on bg (at least 3:1)

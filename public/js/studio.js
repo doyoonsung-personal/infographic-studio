@@ -4,7 +4,7 @@
 import { api, blobUrl, blobText, ApiError } from './api.js';
 import { h, icon, debounce, clone, fmtTime, fmtDate, uid } from './util.js';
 import { t, getLang } from './i18n.js';
-import { computeTimeline, spokenText, clipKey } from './timeline.js';
+import { computeTimeline, spokenText, clipKey, clipFresh, TAG_MODELS, hasTags, stripTags } from './timeline.js';
 import { styleKey, FONT_STACKS } from './assemble.js';
 import { extractTexts } from './lint.js';
 import * as ai from './ai.js';
@@ -104,7 +104,7 @@ export async function openStudio(root, projectId, app) {
     for (const s of scenes) {
       const c = S.p.voice.clips[s.id];
       if (!c) missing.push(s.id);
-      else if (c.key !== clipKey(s.narration, S.p.voice.voiceRef, S.p.voice.speed || 1)) stale.push(s.id);
+      else if (!clipFresh(c, s.narration, S.p.voice)) stale.push(s.id);
     }
     return { total: scenes.length, fresh: scenes.length - missing.length - stale.length, missing, stale };
   }
@@ -312,6 +312,67 @@ export async function openStudio(root, projectId, app) {
     setVoice(patch) {
       for (const k of ['enabled', 'voiceRef', 'speed']) if (patch[k] !== undefined) S.p.voice[k] = k === 'speed' ? Math.min(1.2, Math.max(0.7, Number(patch[k]) || 1)) : patch[k];
       changed({ inspector: S.sel === 'voice' && !patch._typing, preview: true });
+      if (patch.modelId !== undefined) return A.setVoiceModel(patch.modelId);
+    },
+
+    /** The TTS model in use: the project's choice, else the voice's, else the admin default. */
+    ttsModel() {
+      const v = voiceDef();
+      return S.p.voice.modelId || (v && v.modelId) || S.config.models.tts;
+    },
+    tagsInScript() {
+      return S.p.script.scenes.some((s) => hasTags(s.narration));
+    },
+
+    /**
+     * Switch the TTS model. Tag-capable models (v4, v3) offer to add emotion/tone tags;
+     * other models would read the brackets aloud, so their tags are removed.
+     */
+    async setVoiceModel(modelId) {
+      S.p.voice.modelId = modelId || null;
+      changed({ inspector: S.sel === 'voice', preview: true });
+      const tagModel = TAG_MODELS.includes(A.ttsModel());
+      const hasNarration = S.p.script.scenes.some((s) => spokenText(s.narration));
+      if (tagModel && hasNarration && !A.tagsInScript()) {
+        const r = await app.dialog({
+          title: t('tags_title'),
+          body: t('tags_body'),
+          input: t('tags_dir_ph'),
+          ok: t('tags_apply'),
+          cancel: t('tags_skip'),
+        });
+        if (r) await A.addAudioTags(r.value);
+      } else if (!tagModel && A.tagsInScript()) {
+        A.removeAudioTags();
+        app.toast(t('tags_removed'), 'ok');
+      }
+    },
+
+    async addAudioTags(direction) {
+      return A.busy('voice', async () => {
+        const res = await ai.addAudioTags(S.p, direction);
+        pushHistory('script', S.p.script.scenes);
+        let n = 0;
+        for (const s of S.p.script.scenes) {
+          const tagged = res[s.id];
+          if (typeof tagged !== 'string' || tagged === s.narration) continue;
+          // Accept only pure insertions: the words and {n} cues must be unchanged.
+          const same = (x) => stripTags(x).replace(/\s+/g, '');
+          if (same(tagged) !== same(s.narration)) continue;
+          s.narration = tagged.replace(/(\[[^\[\]{}\n]{1,40}\])(?=\S)/g, '$1 ').trim();
+          n++;
+        }
+        changed({ inspector: true, preview: true });
+        app.toast(t('tags_added', { n }), n ? 'ok' : 'err');
+        return { tagged: n };
+      });
+    },
+
+    removeAudioTags() {
+      if (!A.tagsInScript()) return;
+      pushHistory('script', S.p.script.scenes);
+      for (const s of S.p.script.scenes) s.narration = stripTags(s.narration);
+      changed({ inspector: true, preview: true });
     },
 
     async generateVoice(sceneIds, { onlyMissing = false } = {}) {
@@ -330,16 +391,19 @@ export async function openStudio(root, projectId, app) {
           const s = scenes[i];
           S.busy.voiceScene = id;
           if (S.sel === 'voice') renderInsp();
+          const model = A.ttsModel();
+          // Never send tags to a model that would read them aloud.
+          const say = (x) => (TAG_MODELS.includes(model) ? spokenText(x) : spokenText(stripTags(x)));
           const r = await api('tts', {
             method: 'POST',
             body: {
-              text: spokenText(s.narration),
+              text: say(s.narration),
               voiceId: v.voiceId,
-              modelId: v.modelId || S.config.models.tts,
+              modelId: model,
               speed: S.p.voice.speed || 1,
               languageCode: S.p.brief.language,
-              previousText: i > 0 ? spokenText(scenes[i - 1].narration) : undefined,
-              nextText: i < scenes.length - 1 ? spokenText(scenes[i + 1].narration) : undefined,
+              previousText: i > 0 ? spokenText(stripTags(scenes[i - 1].narration)) : undefined,
+              nextText: i < scenes.length - 1 ? spokenText(stripTags(scenes[i + 1].narration)) : undefined,
             },
           });
           S.p.voice.clips[id] = { blobId: r.blobId, duration: r.duration, alignment: r.alignment, key: clipKey(s.narration, S.p.voice.voiceRef, S.p.voice.speed || 1), at: Date.now(), modelId: r.modelId };

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseNarration, spokenText, cueTimes, computeTimeline, clipKey, estimateSeconds } from '../public/js/timeline.js';
+import { parseNarration, spokenText, cueTimes, computeTimeline, clipKey, clipFresh, estimateSeconds, stripTags, hasTags } from '../public/js/timeline.js';
 import { lintComposition, checkScenes, extractTexts } from '../public/js/lint.js';
 import { assembleDocument, styleKey } from '../public/js/assemble.js';
 
@@ -50,6 +50,39 @@ test('computeTimeline uses fresh clips and estimates the rest', () => {
   assert.equal(tl.scenes[1].voice, null, 'stale clip is not used');
   assert.equal(tl.scenes[1].start, tl.scenes[0].end);
   assert.ok(Math.abs(tl.duration - tl.scenes[1].end) < 1e-6);
+});
+
+test('audio tags: detect and strip, keeping words and cue markers', () => {
+  const n = '[warmly] 원두값은 [short pause] {1}1년 만에 {2}38% 올랐습니다';
+  assert.equal(hasTags(n), true);
+  assert.equal(hasTags('원두값은 {1}1년'), false);
+  assert.equal(stripTags(n), '원두값은 {1}1년 만에 {2}38% 올랐습니다');
+  assert.equal(stripTags('no tags {1}here'), 'no tags {1}here');
+});
+
+test('tidyTags splits combined tags and moves tags in front of cue markers', async () => {
+  const { tidyTags } = await import('../public/js/ai.js').catch(() => ({}));
+  if (!tidyTags) return; // ai.js imports browser-only modules in some setups
+  assert.equal(tidyTags('[calmly, confidently] 혼자 {1}[short pause, slightly emphasized] 824만'), '[calmly] [confidently] 혼자 [short pause] [slightly emphasized] {1}824만');
+  assert.equal(stripTags(tidyTags('a {1}[pause] b')), 'a {1}b');
+});
+
+test('cueTimes works whether or not the alignment includes tag characters', () => {
+  const n = '[excited] ab {1}cd';
+  const withTags = spokenText(n); // "[excited] ab cd"
+  const a1 = { chars: withTags.split(''), starts: withTags.split('').map((_, i) => i / 10) };
+  assert.equal(cueTimes(n, a1)['1'], withTags.indexOf('cd') / 10);
+  const bare = 'ab cd';
+  const a2 = { chars: bare.split(''), starts: [0, 0.1, 0.2, 0.3, 0.4] };
+  assert.equal(cueTimes(n, a2)['1'], 0.3);
+});
+
+test('clipFresh notices a model switch', () => {
+  const clip = { key: clipKey('hi', 'v1', 1), modelId: 'eleven_multilingual_v2' };
+  assert.equal(clipFresh(clip, 'hi', { voiceRef: 'v1', speed: 1 }), true);
+  assert.equal(clipFresh(clip, 'hi', { voiceRef: 'v1', speed: 1, modelId: 'eleven_multilingual_v2' }), true);
+  assert.equal(clipFresh(clip, 'hi', { voiceRef: 'v1', speed: 1, modelId: 'eleven_v4' }), false);
+  assert.equal(clipFresh(clip, 'hi [warmly]', { voiceRef: 'v1', speed: 1 }), false);
 });
 
 test('static projects have a single page scene', () => {

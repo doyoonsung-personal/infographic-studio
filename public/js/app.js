@@ -12,6 +12,7 @@ const app = {
   view: null,
   toast,
   confirm,
+  dialog,
   setSaveState,
   setTitle,
 };
@@ -83,6 +84,21 @@ function confirm(title, body) {
           h('button', { class: 'btn ghost', onclick: () => done(false) }, t('cancel')),
           h('button', { class: 'btn claude', onclick: () => done(true) }, t('ok')))));
     document.body.append(bg);
+  });
+}
+
+/** A question with an optional text field. Resolves {value} on OK, null on cancel. */
+function dialog({ title, body, input, ok, cancel }) {
+  return new Promise((resolve) => {
+    const field = input ? h('textarea', { rows: 2, placeholder: input }) : null;
+    const done = (v) => { bg.remove(); resolve(v); };
+    const bg = h('div', { class: 'modal-bg', onclick: (e) => { if (e.target === bg) done(null); } },
+      h('div', { class: 'modal' }, h('h3', {}, title), body ? h('p', { style: { whiteSpace: 'pre-wrap' } }, body) : null, field,
+        h('div', { class: 'row' }, h('span', { class: 'grow' }),
+          h('button', { class: 'btn ghost', onclick: () => done(null) }, cancel || t('cancel')),
+          h('button', { class: 'btn primary', onclick: () => done({ value: field ? field.value.trim() : '' }) }, ok || t('ok')))));
+    document.body.append(bg);
+    if (field) setTimeout(() => field.focus(), 30);
   });
 }
 
