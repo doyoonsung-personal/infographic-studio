@@ -123,14 +123,18 @@
     var count = has(el, 'data-count');
     var draw = has(el, 'data-draw');
     var type = has(el, 'data-type');
-    var defA = (grow || draw || type) ? 'none' : (count ? 'fade' : 'up');
+    var anc = ancestorStart(el, sc);
+    // A counter inside an animated card appears with the card; on its own it fades in.
+    var defA = (grow || draw || type) ? 'none' : (count ? (anc != null ? 'none' : 'fade') : 'up');
     var inT = timeFor(el, sc, 'data-in', 'data-cue', 'data-delay');
     if (inT == null && inherited) inT = inherited.inT;
-    if (inT == null) inT = ancestorStart(el, sc);
+    if (inT == null && anc != null) inT = anc;
     if (inT == null) inT = 0;
     var a = attr(el, 'data-a') || (inherited && inherited.a) || defA;
     var spec = {
       el: el, isSvg: isSvg, a: a, inT: inT,
+      // Visible from the start of the scene (its parent handles the entrance); only the count waits.
+      showAlways: count && anc != null && !attr(el, 'data-a') && !has(el, 'data-in') && !has(el, 'data-cue'),
       d: num(attr(el, 'data-d'), a === 'pop' ? 0.55 : 0.6),
       ease: attr(el, 'data-ease') || (a === 'pop' ? 'back' : 'out'),
       dist: num(attr(el, 'data-dist'), 48),
@@ -215,7 +219,7 @@
     var op = 1, tx = 0, ty = 0, sc = 1, rot = 0, blur = 0, clip = '';
 
     switch (s.a) {
-      case 'none': op = started ? 1 : 0; break;
+      case 'none': op = (started || s.showAlways) ? 1 : 0; break;
       case 'fade': op = p; break;
       case 'up': op = raw > 0 ? Math.min(1, raw * 1.6) : 0; ty = (1 - p) * s.dist; break;
       case 'down': op = raw > 0 ? Math.min(1, raw * 1.6) : 0; ty = -(1 - p) * s.dist; break;

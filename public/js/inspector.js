@@ -246,6 +246,14 @@ const RENDER = {
         j.status === 'fired' && Date.now() - j.createdAt > 12 * 60 * 1000 ? h('div', { class: 'warnbox' }, t('job_stalled')) : null,
         h('div', { class: 'joblog' }, (j.log || []).slice().reverse().map((l) => h('div', {}, `${new Date(l.at).toLocaleTimeString()}  ${l.msg}`)))));
     }
+    const tk = S.manualTicket && S.job && S.job.id === S.manualTicket.id ? S.manualTicket : null;
+    body.append(h('details', { class: 'card', open: Boolean(tk) },
+      h('summary', { class: 'lbl', style: { cursor: 'pointer' } }, t('manual_title')),
+      h('div', { class: 'hint' }, t('manual_hint')),
+      tk ? h('pre', { class: 'mono', style: { whiteSpace: 'pre-wrap', userSelect: 'all', background: '#0c0f15', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px' } },
+        t('manual_prompt', { id: tk.id, token: tk.token })) : null,
+      h('div', { class: 'row' }, h('span', { class: 'grow' }),
+        h('button', { class: 'btn sm', disabled: running || !S.p.script.scenes.length, onclick: () => A.startJob('build', { manual: true }).catch((e) => A.app.toast(e.message, 'err')) }, icon('build'), t('manual_make')))));
     if (S.versions.length) {
       const instr = h('textarea', { placeholder: t('revise_ph') });
       const sceneSel = h('select', {}, h('option', { value: '' }, t('all_scenes')), S.p.script.scenes.map((s) => h('option', { value: s.id }, `${s.id} ${s.title || ''}`)));

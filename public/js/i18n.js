@@ -30,6 +30,8 @@ const S = {
     revise: '수정 요청', revise_ph: '예: 3번 장면 숫자를 더 크게, 막대가 더 천천히 자라게', revise_scene: '대상 장면', all_scenes: '전체',
     rerender: '현재 수정으로 다시 렌더', rerender_hint: '텍스트·색 변경을 영상에 반영합니다 (디자인은 그대로).',
     job_stalled: '루틴이 12분 넘게 앱에 연결하지 않았습니다. "세션 보기"에서 원인을 확인하세요. 흔한 원인: 루틴 환경의 네트워크 허용 목록에 infographic-studio.pages.dev 가 없음.',
+    manual_title: '고급: 이 PC에서 직접 빌드', manual_hint: '루틴을 쓸 수 없을 때, 내 PC의 Claude Code로 같은 작업을 처리합니다. 아래 버튼으로 작업을 만든 뒤, 프로젝트 폴더에서 연 Claude Code에 안내 문구를 붙여 넣으세요.',
+    manual_make: '수동 작업 만들기', manual_prompt: 'routine/ROUTINE.md 순서대로 이 작업을 처리해줘. 앱 주소는 STUDIO_API_BASE 또는 routine/app.json을 써.\njob_id: {id}\ntoken: {token}',
     job_running: '진행 중', job_watch: '세션 보기', job_done: '완료 — v{v}', job_failed: '실패', job_queued: '대기 중',
     versions: '버전', use_version: '이 버전 사용', no_versions: '아직 빌드가 없습니다.',
     confirm_build: 'Claude 빌드를 시작할까요?', confirm_build_body: '루틴 1회 실행이 내 Claude 구독 사용량을 씁니다.',
@@ -48,6 +50,7 @@ const S = {
     music_styles: '음악 스타일', prompt: '프롬프트', models: '모델', chat_model: '채팅', writer_model: '스크립트', research_model: '리서치', tts_model: 'TTS 기본', music_model: '음악',
     defaults: '기본값', save: '저장', saved_ok: '저장했습니다', services: '연결 상태', test_routine: '루틴 테스트 (ping)', test_routine_hint: '루틴이 앱에 연결되는지 확인합니다. 짧은 실행 1회가 구독 사용량을 조금 씁니다.',
     add_to_list: '목록에 추가', in_list: '추가됨', palette_name: '팔레트 이름',
+    voices_perm: 'ElevenLabs API 키에 voices_read 권한이 없습니다. ElevenLabs → Developers → API Keys에서 키 권한에 "Voices: Read"를 켜거나, Voice ID를 직접 추가하세요.',
   },
   en: {
     appSub: 'infographic studio',
@@ -78,6 +81,8 @@ const S = {
     revise: 'Request changes', revise_ph: 'e.g. make the number in scene 3 bigger, slow the bars down', revise_scene: 'Scene', all_scenes: 'All',
     rerender: 'Re-render with current edits', rerender_hint: 'Bakes text and colour edits into the video (same design).',
     job_stalled: 'The routine has not reached the app for 12+ minutes. Open "Watch session" to see why. Common cause: infographic-studio.pages.dev is missing from the routine environment\'s allowed domains.',
+    manual_title: 'Advanced: build on this PC', manual_hint: 'When the routine is unavailable, run the same job with Claude Code on your own PC. Create the job here, then paste the text below into Claude Code opened in the project folder.',
+    manual_make: 'Create manual job', manual_prompt: 'Process this job following routine/ROUTINE.md. The app address comes from STUDIO_API_BASE or routine/app.json.\njob_id: {id}\ntoken: {token}',
     job_running: 'Running', job_watch: 'Watch session', job_done: 'Done — v{v}', job_failed: 'Failed', job_queued: 'Queued',
     versions: 'Versions', use_version: 'Use this version', no_versions: 'No builds yet.',
     confirm_build: 'Start a Claude build?', confirm_build_body: 'One routine run uses your Claude plan.',
@@ -96,6 +101,7 @@ const S = {
     music_styles: 'Music styles', prompt: 'Prompt', models: 'Models', chat_model: 'Chat', writer_model: 'Script', research_model: 'Research', tts_model: 'Default TTS', music_model: 'Music',
     defaults: 'Defaults', save: 'Save', saved_ok: 'Saved', services: 'Connections', test_routine: 'Test the routine (ping)', test_routine_hint: 'Checks the routine can reach the app. One short run uses a little of your plan.',
     add_to_list: 'Add to list', in_list: 'Added', palette_name: 'Palette name',
+    voices_perm: 'The ElevenLabs API key lacks the voices_read permission. Turn on "Voices: Read" for the key in ElevenLabs → Developers → API Keys, or add Voice IDs by hand.',
   },
 };
 

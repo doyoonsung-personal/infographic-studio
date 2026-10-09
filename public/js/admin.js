@@ -14,7 +14,7 @@ export async function openAdmin(root, app) {
   const cfg = clone(await api('config'));
   const me = await api('me');
   const wrap = h('div', { class: 'admin' });
-  root.replaceChildren(wrap);
+  root.replaceChildren(h('div', { class: 'view' }, wrap));
 
   const saveBtn = h('button', { class: 'btn primary', onclick: save }, t('save'));
   async function save() {
@@ -103,8 +103,9 @@ export async function openAdmin(root, app) {
         filter.oninput = draw;
         importBox.replaceChildren(filter, list);
         draw();
-      } catch (e) { app.toast(e.message, 'err'); }
-      finally { importBtn.disabled = false; }
+      } catch (e) {
+        app.toast(/voices_read/.test(e.message) ? t('voices_perm') : e.message, 'err');
+      } finally { importBtn.disabled = false; }
     };
     return h('section', { class: 'panel' },
       h('h2', {}, icon('voice'), t('voices')),

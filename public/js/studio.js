@@ -369,16 +369,18 @@ export async function openStudio(root, projectId, app) {
       });
     },
 
-    async startJob(kind, { instruction = '', sceneId = null, confirmed = false } = {}) {
+    async startJob(kind, { instruction = '', sceneId = null, confirmed = false, manual = false } = {}) {
       if (S.job && ['queued', 'fired', 'running'].includes(S.job.status)) throw new Error(t('job_running'));
-      if (!confirmed) {
+      if (!confirmed && !manual) {
         const vs = voiceStatus();
         const extra = S.p.voice.enabled && S.p.brief.format !== 'static' && vs.fresh < vs.total ? t('voice_not_ready', { n: vs.total - vs.fresh }) : '';
         const ok = await app.confirm(t('confirm_build'), [t('confirm_build_body'), extra, !S.me.configured.routine ? t('routine_off') : ''].filter(Boolean).join('\n\n'));
         if (!ok) return null;
       }
       const snapshot = { ...clone(S.p), chat: [], history: {} };
-      const job = await api('jobs', { method: 'POST', body: { kind, instruction, sceneId, project: snapshot } });
+      const job = await api('jobs', { method: 'POST', body: { kind, instruction, sceneId, project: snapshot, manual } });
+      S.manualTicket = manual ? { id: job.id, token: job.token } : null;
+      delete job.token;
       S.job = job;
       S.p.build.activeJobId = job.id;
       S.p.build.lastJob = job.id;
