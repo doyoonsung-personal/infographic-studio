@@ -25,6 +25,7 @@ import { mixAudio } from './lib/audio.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUNTIME = fs.readFileSync(path.join(ROOT, 'public/runtime/stage.js'), 'utf8');
 const MAX_UPLOAD = 24.5 * 1024 * 1024;
+const PINNED_CHROME = '131.0.6778.85'; // Chrome for Testing build used when "stable" can't be resolved
 
 /* ---------- args ---------- */
 const [cmd, ...rest] = process.argv.slice(2);
@@ -117,7 +118,17 @@ async function cmdSetup() {
   }
   if (!findChrome() && process.platform === 'linux') {
     lines.push('chrome: installing Chrome for Testing headless shell');
-    sh(`${sudo}mkdir -p /opt/chrome && ${sudo}npx -y @puppeteer/browsers install chrome-headless-shell@stable --path /opt/chrome >/dev/null`);
+    sh(`${sudo}mkdir -p /opt/chrome && ${sudo}npx -y @puppeteer/browsers install chrome-headless-shell@stable --path /opt/chrome >/dev/null 2>&1`);
+    if (!findChrome()) {
+      // "stable" is resolved via googlechromelabs.github.io, which the default allowlist blocks;
+      // a pinned build downloads straight from storage.googleapis.com, which it allows.
+      const v = PINNED_CHROME;
+      lines.push(`chrome: falling back to pinned build ${v}`);
+      sh(`set -e; d=/opt/chrome/chrome-headless-shell/linux-${v}; ${sudo}mkdir -p "$d"; ` +
+        `curl -fsSL -o /tmp/chs.zip "https://storage.googleapis.com/chrome-for-testing-public/${v}/linux64/chrome-headless-shell-linux64.zip"; ` +
+        `(command -v unzip >/dev/null && ${sudo}unzip -q -o /tmp/chs.zip -d "$d") || ${sudo}python3 -m zipfile -e /tmp/chs.zip "$d"; ` +
+        `${sudo}chmod +x "$d"/chrome-headless-shell-linux64/chrome-headless-shell`);
+    }
   }
   const ok = {
     node: process.version,
