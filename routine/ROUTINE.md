@@ -69,6 +69,11 @@ node routine/worker.mjs upload --job <job_id> --notes "2–4 sentences: what you
 
 The app shows the new version immediately after this.
 
+## If the owner cancels
+
+If any worker command reports `job cancelled by the owner`, stop immediately: don't render, upload or
+call `fail`. End the run with one line saying the job was cancelled.
+
 ## If something blocks you
 
 ```bash

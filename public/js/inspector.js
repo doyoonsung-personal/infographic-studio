@@ -263,10 +263,11 @@ const RENDER = {
       h('div', { class: 'row' }, h('span', { class: 'grow' }),
         h('button', { class: 'btn claude', disabled: running || !S.p.script.scenes.length, onclick: () => A.startJob('build').catch((e) => A.app.toast(e.message, 'err')) }, icon('build'), t('build_new')))));
     if (j) {
-      const label = j.status === 'done' ? t('job_done', { v: j.version || '' }) : j.status === 'failed' ? t('job_failed') : j.status === 'queued' ? t('job_queued') : t('job_running');
+      const label = j.status === 'done' ? t('job_done', { v: j.version || '' }) : j.status === 'failed' ? t('job_failed') : j.status === 'cancelled' ? t('job_cancelled_short') : j.status === 'queued' ? t('job_queued') : t('job_running');
       body.append(h('div', { class: 'card' },
-        h('div', { class: 'card-h' }, h('span', { class: 'pill s-' + (j.status === 'done' ? 'done' : j.status === 'failed' ? 'error' : 'running') }, label), h('b', {}, j.kind), h('span', { class: 'grow', style: { flex: 1 } }),
-          j.sessionUrl ? h('a', { class: 'btn xs', href: j.sessionUrl, target: '_blank', rel: 'noopener' }, icon('link'), t('job_watch')) : null),
+        h('div', { class: 'card-h' }, h('span', { class: 'pill s-' + (j.status === 'done' ? 'done' : j.status === 'failed' || j.status === 'cancelled' ? 'error' : 'running') }, label), h('b', {}, j.kind), h('span', { class: 'grow', style: { flex: 1 } }),
+          j.sessionUrl ? h('a', { class: 'btn xs', href: j.sessionUrl, target: '_blank', rel: 'noopener' }, icon('link'), t('job_watch')) : null,
+          running ? h('button', { class: 'btn xs danger', onclick: () => A.cancelJob().catch((e) => A.app.toast(e.message, 'err')) }, icon('x'), t('job_cancel')) : null),
         j.error ? h('div', { class: 'err' }, j.error) : null,
         j.status === 'fired' && Date.now() - j.createdAt > 12 * 60 * 1000 ? h('div', { class: 'warnbox' }, t('job_stalled')) : null,
         h('div', { class: 'joblog' }, (j.log || []).slice().reverse().map((l) => h('div', {}, `${new Date(l.at).toLocaleTimeString()}  ${l.msg}`)))));

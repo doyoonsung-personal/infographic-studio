@@ -78,7 +78,9 @@ export async function handle(context) {
       if (parts.length === 1 && method === 'POST') {
         return json(await jobs.createJob(env, await readJson(request, 4_000_000), url.origin));
       }
+      if (parts.length === 1 && method === 'GET') return json({ jobs: await jobs.listJobs(env, { active: url.searchParams.get('all') !== '1' }) });
       if (parts.length === 2 && method === 'GET') return json(await jobs.jobForUser(env, parts[1]));
+      if (parts.length === 3 && parts[2] === 'cancel' && method === 'POST') return json(await jobs.cancelJob(env, parts[1]));
     }
 
     fail(404, 'no such endpoint: ' + method + ' /api/' + path);

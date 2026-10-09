@@ -32,7 +32,50 @@ export async function openAdmin(root, app) {
   function render() {
     wrap.replaceChildren(
       h('div', { class: 'row' }, h('h1', { class: 'grow' }, t('admin_title')), saveBtn),
-      services(), voices(), music(), palettes(), models());
+      services(), activeJobs(), voices(), music(), palettes(), models());
+  }
+
+  // Jobs still queued/running (e.g. a routine run that never reported back) with a way to stop them.
+  function activeJobs() {
+    const list = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } }, h('div', { class: 'hint' }, '…'));
+    const cancelAll = h('button', { class: 'btn sm danger', hidden: true }, icon('x'), t('cancel_all'));
+    const panel = h('section', { class: 'panel' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, icon('build'), t('active_jobs')), cancelAll,
+        h('button', { class: 'btn sm icon ghost', title: t('regen'), onclick: () => load() }, icon('refresh'))),
+      h('div', { class: 'hint' }, t('active_jobs_hint')),
+      list);
+    const age = (ts) => {
+      const m = Math.round((Date.now() - (ts || Date.now())) / 60000);
+      return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+    };
+    async function stop(id) {
+      await api(`jobs/${id}/cancel`, { method: 'POST' });
+    }
+    async function load() {
+      try {
+        const { jobs } = await api('jobs');
+        cancelAll.hidden = jobs.length < 2;
+        cancelAll.onclick = async () => {
+          if (!(await app.confirm(t('cancel_all'), `${jobs.length}`))) return;
+          for (const j of jobs) await stop(j.id).catch(() => {});
+          app.toast(t('job_cancelled'), 'ok');
+          load();
+        };
+        list.replaceChildren(...(jobs.length ? jobs.map((j) => h('div', { class: 'clip' },
+          h('span', { class: 'pill s-running' }, j.status),
+          h('b', { style: { minWidth: '60px' } }, j.kind),
+          h('span', { class: 'txt' }, `${j.title || j.id} · ${t('updated')} ${age(j.updatedAt)} ago`),
+          j.projectId ? h('a', { class: 'btn xs ghost', href: '#/p/' + j.projectId }, t('open')) : null,
+          h('button', { class: 'btn xs danger', onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try { await stop(j.id); app.toast(t('job_cancelled'), 'ok'); } catch (er) { app.toast(er.message, 'err'); }
+            load();
+          } }, icon('x'), t('job_cancel'))))
+          : [h('div', { class: 'hint' }, t('no_active_jobs'))]));
+      } catch (e) { list.replaceChildren(h('div', { class: 'err' }, e.message)); }
+    }
+    load();
+    return panel;
   }
 
   function services() {

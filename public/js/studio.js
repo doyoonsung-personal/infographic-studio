@@ -433,8 +433,22 @@ export async function openStudio(root, projectId, app) {
       });
     },
 
+    async cancelJob() {
+      const id = (S.job && S.job.id) || S.p.build.activeJobId;
+      if (!id) return;
+      const job = await api(`jobs/${id}/cancel`, { method: 'POST' });
+      clearTimeout(pollTimer);
+      S.job = job;
+      S.p.build.activeJobId = null;
+      changed({ inspector: S.sel === 'build' });
+      app.toast(t('job_cancelled'), 'ok');
+    },
+
     async startJob(kind, { instruction = '', sceneId = null, confirmed = false, manual = false } = {}) {
-      if (S.job && ['queued', 'fired', 'running'].includes(S.job.status)) throw new Error(t('job_running'));
+      // A job that has been silent for an hour is dead (the server expires it too), so it doesn't block.
+      if (S.job && ['queued', 'fired', 'running'].includes(S.job.status) && Date.now() - (S.job.updatedAt || S.job.createdAt) < 60 * 60 * 1000) {
+        throw new Error(t('job_running'));
+      }
       if (!confirmed && !manual) {
         const vs = voiceStatus();
         const extra = S.p.voice.enabled && S.p.brief.format !== 'static' && vs.fresh < vs.total ? t('voice_not_ready', { n: vs.total - vs.fresh }) : '';
@@ -513,10 +527,10 @@ export async function openStudio(root, projectId, app) {
         app.toast(t('job_done', { v: job.version || '' }), 'ok');
         return;
       }
-      if (job.status === 'failed') {
+      if (job.status === 'failed' || job.status === 'cancelled') {
         S.p.build.activeJobId = null;
         changed({ inspector: S.sel === 'build' });
-        app.toast(t('job_failed') + ': ' + (job.error || ''), 'err');
+        if (job.status === 'failed') app.toast(t('job_failed') + ': ' + (job.error || ''), 'err');
         return;
       }
       renderNode('build');
@@ -691,7 +705,9 @@ export async function openStudio(root, projectId, app) {
           ? [h('div', { class: 'big' }, (j.log && j.log.length ? j.log[j.log.length - 1].msg : t('job_running'))), h('div', { class: 'line' }, `${j.kind} · ${j.stage}`)]
           : S.versions.length ? [h('div', { class: 'big' }, `v${currentVersion().v} · ${fmtDate(currentVersion().createdAt)}`), h('div', { class: 'line' }, `${S.versions.length} ${t('versions')}`)]
             : [h('div', {}, t('build_hint'))];
-        foot = [h('button', { class: 'btn sm claude', disabled: running || !p.script.scenes.length, onclick: async (e) => { e.stopPropagation(); try { await A.startJob('build'); } catch (er) { app.toast(er.message, 'err'); } } }, icon('build'), t('build_new')), openBtn];
+        foot = [running
+          ? h('button', { class: 'btn sm danger', onclick: async (e) => { e.stopPropagation(); try { await A.cancelJob(); } catch (er) { app.toast(er.message, 'err'); } } }, icon('x'), t('job_cancel'))
+          : h('button', { class: 'btn sm claude', disabled: !p.script.scenes.length, onclick: async (e) => { e.stopPropagation(); try { await A.startJob('build'); } catch (er) { app.toast(er.message, 'err'); } } }, icon('build'), t('build_new')), openBtn];
         break;
       }
     }
