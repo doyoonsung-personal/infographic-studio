@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler pages dev public --kv STUDIO_KV --port 8788",
     "worker": "node routine/worker.mjs",
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "playwright-core": "^1.56.0"

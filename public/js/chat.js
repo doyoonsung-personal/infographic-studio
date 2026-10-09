@@ -20,7 +20,7 @@ const TOOLS = [
     font: { type: 'string', enum: ['sans', 'serif', 'display'] }, motion: { type: 'string', enum: ['calm', 'lively'] }, notes: str(),
   }),
   fn('suggest_palettes', 'Generate 3 palette ideas and show them to the owner as clickable swatches.', { direction: str() }),
-  fn('palette_from_website', 'Build a palette from a brand website\'s colours and apply it.', { url: str() }, ['url']),
+  fn('palette_from_website', 'Build a palette from a brand website\'s colours and apply it. Only when the owner gave a website URL.', { url: str('http(s) URL the owner gave') }, ['url']),
   fn('set_voice', 'Narration settings: enabled, voice_id (one of the available voices), speed 0.7-1.2.', { enabled: { type: 'boolean' }, voice_id: str(), speed: { type: 'number' } }),
   fn('generate_voice', 'PAID (ElevenLabs credits): generate narration audio. Shows a confirm button to the owner.', { scene_ids: { type: 'array', items: str() }, only_missing: { type: 'boolean' } }),
   fn('set_music', 'Music settings: enabled, style_id (one of the music styles), custom prompt, volume 0-1.', { enabled: { type: 'boolean' }, style_id: str(), prompt: str(), volume: { type: 'number' } }),
@@ -45,6 +45,9 @@ How to work:
 - Reply in ${lang}, briefly (1-3 sentences). Be concrete.
 - Change the project with tools instead of describing changes. You may call several tools in a row.
 - Tools marked PAID only show a confirm button; call them only when the owner asks for that kind of action (or clearly agrees), then say a button is waiting.
+- Each owner message is ONE new request. Earlier requests in the history are already done (their "[Already done…]" notes say what was done); never redo them.
+- Do the smallest set of tool calls that fulfils the request. After write_script, do not call edit_scene unless the owner dictated exact wording.
+- palette_from_website only when the owner gives a website URL. For "brighter/warmer/…" colour requests use set_style with a fitting saved palette_id or custom colors, or suggest_palettes.
 - To change wording on screen after a build, use edit_text (instant). For layout/motion/design changes after a build, use request_revision.
 - Never invent statistics; facts come from research_facts.
 - The current project state is given below and is refreshed every turn.`;
@@ -79,7 +82,10 @@ export function mountChat(root, A) {
 
   // History
   if (!S.p.chat.length) bubble('assistant', t('chat_hello'));
-  for (const m of S.p.chat) bubble(m.role, m.content);
+  for (const m of S.p.chat) {
+    if (m.actions && m.actions.length) bubble('tool', '✓ ' + m.actions.join(' · '));
+    if (m.content && m.content !== '✓') bubble(m.role, m.content);
+  }
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
@@ -108,10 +114,29 @@ export function mountChat(root, A) {
     }
   }
 
+  // Earlier turns are replayed with their tool calls and results in the API's own format, so the
+  // model knows those requests are finished (and doesn't imitate a text note instead of calling tools).
+  function historyForModel() {
+    const out = [];
+    S.p.chat.slice(-16).forEach((m, i) => {
+      if (m.role === 'assistant' && m.calls && m.calls.length) {
+        const ids = m.calls.map((_, k) => `h${i}_${k}`);
+        out.push({ role: 'assistant', content: '', tool_calls: m.calls.map((c, k) => ({ id: ids[k], type: 'function', function: { name: c.name, arguments: c.args || '{}' } })) });
+        m.calls.forEach((c, k) => out.push({ role: 'tool', tool_call_id: ids[k], content: JSON.stringify(c.result || { ok: true }) }));
+        if (m.content && m.content !== '✓') out.push({ role: 'assistant', content: m.content });
+      } else if (m.content && m.content !== '✓') {
+        out.push({ role: m.role, content: m.content });
+      }
+    });
+    return out;
+  }
+
   async function runAgent() {
-    const history = S.p.chat.slice(-16).map((m) => ({ role: m.role, content: m.content }));
     const sys = () => ({ role: 'system', content: systemPrompt() + '\n\nPROJECT STATE (live):\n' + A.projectSummary() });
-    const messages = [sys(), ...history];
+    const messages = [sys(), ...historyForModel()];
+    const actions = [];
+    const calls = [];
+    let finalText = '';
     for (let round = 0; round < 6; round++) {
       const el = bubble('assistant', '');
       el.append(h('span', { class: 'typing' }));
@@ -119,14 +144,8 @@ export function mountChat(root, A) {
         signal: ctl.signal,
         onDelta: ({ content }) => { el.textContent = content; msgs.scrollTop = msgs.scrollHeight; },
       });
-      if (res.content.trim()) el.textContent = res.content; else el.remove();
-      if (!res.toolCalls.length) {
-        if (res.content.trim()) {
-          S.p.chat.push({ role: 'assistant', content: res.content.trim() });
-          A.changed({ canvas: false });
-        }
-        return;
-      }
+      if (res.content.trim()) { el.textContent = res.content; finalText = res.content.trim(); } else el.remove();
+      if (!res.toolCalls.length) break;
       messages.push({ role: 'assistant', content: res.content || '', tool_calls: res.toolCalls });
       for (const call of res.toolCalls) {
         let args = {};
@@ -136,15 +155,32 @@ export function mountChat(root, A) {
         try {
           result = await runTool(call.function.name, args);
           note.textContent = '✓ ' + call.function.name + (result && result.note ? ' — ' + result.note : '');
+          actions.push(call.function.name + (result && result.note ? ` (${result.note})` : ''));
         } catch (e) {
           result = { error: e.message || String(e) };
           note.textContent = '⚠ ' + call.function.name + ': ' + result.error;
+          actions.push(call.function.name + ' failed');
         }
+        const rawArgs = call.function.arguments || '{}';
+        calls.push({ name: call.function.name, args: rawArgs.length <= 600 ? rawArgs : '{}', result: compact(result) });
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 6000) });
       }
       // Refresh the state for the next round.
       messages[0] = sys();
     }
+    if (finalText || actions.length) {
+      S.p.chat.push({ role: 'assistant', content: finalText || '✓', actions, calls });
+      A.changed({ canvas: false });
+    }
+  }
+
+  function compact(r) {
+    if (!r || typeof r !== 'object') return { ok: true };
+    const out = {};
+    for (const [k, v] of Object.entries(r)) {
+      if (['ok', 'note', 'error', 'status', 'scenes', 'facts', 'applied'].includes(k)) out[k] = v;
+    }
+    return out;
   }
 
   function confirmCard(title, detail, run) {

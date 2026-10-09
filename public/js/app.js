@@ -52,11 +52,14 @@ function drawTopbar() {
       signedIn ? h('button', { class: 'btn sm ghost', onclick: logout }, t('logout')) : null));
 }
 
+// setTitle(title) updates the text; setTitle(title, fn) also makes it editable; setTitle(title, null) makes it plain.
 function setTitle(title, onChange) {
-  titleHandler = onChange || null;
-  titleInput.value = title || '';
-  titleInput.hidden = !onChange;
-  crumb.replaceChildren(h('span', { class: 'sep' }, '/'), titleInput, saveState);
+  if (onChange !== undefined) {
+    titleHandler = onChange || null;
+    titleInput.hidden = !onChange;
+  }
+  if (document.activeElement !== titleInput) titleInput.value = title || '';
+  crumb.replaceChildren(h('span', { class: 'sep' }, '/'), titleInput.hidden ? h('b', {}, title || '') : titleInput, saveState);
 }
 
 function setSaveState(s) {

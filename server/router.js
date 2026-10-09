@@ -68,7 +68,7 @@ export async function handle(context) {
     }
 
     if (path === 'ai/chat' && method === 'POST') return await qwen.chat(env, await readJson(request, 4_000_000), await loadConfig(env));
-    if (path === 'ai/research' && method === 'POST') return json(await qwen.research(env, await readJson(request), await loadConfig(env)));
+    if (path === 'ai/research' && method === 'POST') return await qwen.research(env, await readJson(request), await loadConfig(env));
     if (path === 'tts' && method === 'POST') return json(await eleven.tts(env, await readJson(request), await loadConfig(env)));
     if (path === 'music' && method === 'POST') return json(await eleven.music(env, await readJson(request), await loadConfig(env)));
     if (path === 'eleven/voices' && method === 'GET') return json(await eleven.voices(env));
@@ -109,7 +109,8 @@ async function login(request, env) {
 
 function meta(p) {
   return {
-    title: String(p.title || p.brief?.topic || '').slice(0, 140),
+    // KV metadata: ASCII-safe and under the 1,024-byte cap (an encoded Korean character is 9 bytes).
+    t: encodeURIComponent(String(p.title || p.brief?.topic || '').slice(0, 60)),
     updatedAt: p.updatedAt || Date.now(),
     createdAt: p.createdAt || Date.now(),
     format: p.brief?.format || 'animated',
@@ -121,8 +122,12 @@ function meta(p) {
 async function projects(request, env, parts, method) {
   if (parts.length === 0 && method === 'GET') {
     const keys = await listAll(env, 'project:');
-    const list = keys.map((k) => ({ id: k.name.slice(8), ...(k.metadata || {}) }))
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const list = keys.map((k) => {
+      const { t, ...m } = k.metadata || {};
+      let title = m.title || '';
+      try { if (t) title = decodeURIComponent(t); } catch {}
+      return { id: k.name.slice(8), ...m, title };
+    }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     return json({ projects: list });
   }
   if (parts.length === 0 && method === 'POST') {

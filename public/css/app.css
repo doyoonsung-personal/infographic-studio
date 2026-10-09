@@ -31,6 +31,7 @@ svg.i{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .brand-name{font-weight:800;font-size:15px;letter-spacing:-.01em;white-space:nowrap}
 .brand-name span{color:var(--accent2)}
 .crumb{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.crumb b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .crumb .sep{color:var(--faint)}
 .title-input{background:transparent;border:1px solid transparent;border-radius:8px;padding:5px 8px;font-weight:700;font-size:14px;min-width:80px;max-width:420px;width:100%;outline:none;text-overflow:ellipsis}
 .title-input:hover{border-color:var(--border2)}
@@ -271,5 +272,8 @@ input[type=color]{width:34px;height:30px;border:1px solid var(--border2);border-
   .mtabs button.on{color:var(--accent2)}
   .brand-name{display:none}
   .crumb .sep{display:none}
+  .crumb{overflow:hidden}
+  .svc,.save-state{display:none}
+  .top-actions{gap:2px}
   .grid3{grid-template-columns:1fr 1fr}
 }

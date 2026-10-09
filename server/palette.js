@@ -41,10 +41,15 @@ export async function colorsFromUrl(body) {
 }
 
 async function getText(href) {
-  const r = await fetch(href, {
-    headers: { 'user-agent': 'Mozilla/5.0 (InfographicStudio palette reader)', accept: 'text/html,text/css,*/*' },
-    redirect: 'follow',
-  });
+  let r;
+  try {
+    r = await fetch(href, {
+      headers: { 'user-agent': 'Mozilla/5.0 (InfographicStudio palette reader)', accept: 'text/html,text/css,*/*' },
+      redirect: 'follow',
+    });
+  } catch (e) {
+    fail(502, 'could not reach ' + href + ': ' + (e.message || e));
+  }
   if (!r.ok) fail(502, 'could not read ' + href + ' (' + r.status + ')');
   const t = await r.text();
   return t.slice(0, MAX_TEXT);

@@ -51,32 +51,25 @@ export async function chat(env, body, config) {
   });
 }
 
-/** POST /api/ai/research — one web-search-grounded answer: { text, sources, queries }. */
+/**
+ * POST /api/ai/research — a web-search-grounded answer from the Responses API, streamed as
+ * Server-Sent Events straight to the browser (a thorough search can take several minutes, longer
+ * than a non-streamed request is allowed to stay open). The browser reads `response.completed`.
+ */
 export async function research(env, body, config) {
   const input = String(body.input || '').slice(0, 40000);
   if (!input) fail(400, 'input required');
+  const model = config.models.research;
   const r = await fetch(base(env) + '/responses', {
     method: 'POST',
     headers: headers(env),
-    body: JSON.stringify({ model: config.models.research, input, tools: [{ type: 'web_search' }] }),
+    body: JSON.stringify({ model, input, tools: [{ type: 'web_search' }], stream: true }),
   });
-  const text = await r.text();
-  if (!r.ok) fail(r.status === 429 ? 429 : 502, 'Qwen research error ' + r.status + ': ' + text.slice(0, 600));
-  let j;
-  try { j = JSON.parse(text); } catch { fail(502, 'Qwen research returned non-JSON'); }
-  const out = { text: '', sources: [], queries: [], model: j.model };
-  const seen = new Set();
-  for (const item of j.output || []) {
-    if (item.type === 'web_search_call' && item.action) {
-      for (const q of item.action.queries || [item.action.query]) if (q) out.queries.push(q);
-      for (const s of item.action.sources || []) {
-        if (s && s.url && !seen.has(s.url)) { seen.add(s.url); out.sources.push(s.url); }
-      }
-    }
-    if (item.type === 'message') {
-      for (const c of item.content || []) if (c.type === 'output_text') out.text += c.text;
-    }
+  if (!r.ok) {
+    const text = await r.text();
+    fail(r.status === 429 ? 429 : 502, 'Qwen research error ' + r.status + ': ' + text.slice(0, 600));
   }
-  if (j.usage) out.usage = j.usage;
-  return out;
+  return new Response(r.body, {
+    headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', 'x-model': model },
+  });
 }

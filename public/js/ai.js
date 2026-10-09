@@ -1,7 +1,7 @@
 // Qwen-powered steps: brief suggestions, fact research, script writing, palettes.
 // Each function returns plain data; the studio decides where to put it.
 
-import { chatStream, api } from './api.js';
+import { chatStream, researchStream, api } from './api.js';
 import { extractJSON, validPalette, contrast, COLOR_KEYS } from './util.js';
 
 const LANGNAME = { ko: 'Korean', en: 'English' };
@@ -29,8 +29,9 @@ function factsBlock(p) {
     `${i + 1}. ${f.claim}${f.value ? ` [${f.value}]` : ''}${f.date ? ` (${f.date})` : ''}${f.source ? ` — ${f.source}` : ''}`).join('\n');
 }
 
+// Thinking stays off by default: with it on, Qwen3.8-max takes minutes per script for little gain.
 async function json(messages, opts = {}) {
-  const res = await chatStream({ messages, role: 'writer', thinking: opts.thinking ?? true }, { signal: opts.signal, onDelta: opts.onDelta });
+  const res = await chatStream({ messages, role: 'writer', thinking: opts.thinking ?? false, json: Boolean(opts.json) }, { signal: opts.signal, onDelta: opts.onDelta });
   return extractJSON(res.content);
 }
 
@@ -40,21 +41,37 @@ export async function suggestBrief(p, direction, opts) {
   const user = `${briefBlock(p)}\n${direction ? `Direction from the owner: ${direction}\n` : ''}
 Sharpen this into a brief. Return JSON:
 {"title": "short project title", "takeaway": "ONE sentence a viewer should remember", "audience": "who it is for", "tone": "2-4 words"}
-Write the values in ${langOf(p)}. Keep the owner's topic; make the takeaway concrete and specific.`;
+Write the values in ${langOf(p)}. Keep the owner's topic; make the takeaway concrete and specific.
+Do NOT put statistics or numbers in the takeaway unless the owner gave them: the facts are researched later, so phrase it as the point the numbers will prove.`;
   return json([{ role: 'system', content: sys }, { role: 'user', content: user }], { thinking: false, ...opts });
 }
 
 /* ---------- facts ---------- */
-export async function researchFacts(p, focus) {
+export async function researchFacts(p, focus, { onProgress, signal } = {}) {
   const input = `You are researching facts for an infographic.
 ${briefBlock(p)}
 ${focus ? `Research focus: ${focus}\n` : ''}Today is ${today()}. Search the web. Prefer primary and official sources (statistics agencies, company filings, central banks, reputable newsrooms) and the most recent figures.
+Be efficient: use at most 3 rounds of web searches, then answer.
 
 Return ONLY a JSON object, no prose:
 {"facts":[{"claim":"one-sentence fact in ${langOf(p)}","value":"the key number with its unit","date":"the period or as-of date of the number","source":"publisher name","url":"the exact page you used"}],
  "summary":"two sentences in ${langOf(p)} on what the data says"}
-Give 5 to 10 facts that together support (or correct) the takeaway. Every fact needs a real URL you used. Never invent or round numbers beyond what the source says.`;
-  const r = await api('ai/research', { method: 'POST', body: { input } });
+Give 5 to 8 facts that together support (or correct) the takeaway. Every fact needs a real URL you used. Never invent or round numbers beyond what the source says.`;
+  let searches = 0;
+  const final = await researchStream(input, {
+    signal,
+    onSearch: (qs) => { searches++; if (onProgress) onProgress(`🔎 ${searches}: ${(qs || []).slice(0, 2).join(' · ')}`); },
+    onText: (txt) => { if (onProgress) onProgress(`✍ ${txt.length}…`); },
+  });
+  const r = { text: '', sources: [], queries: [] };
+  const seen = new Set();
+  for (const item of final.output || []) {
+    if (item.type === 'web_search_call' && item.action) {
+      for (const q of item.action.queries || [item.action.query]) if (q) r.queries.push(q);
+      for (const s of item.action.sources || []) if (s && s.url && !seen.has(s.url)) { seen.add(s.url); r.sources.push(s.url); }
+    }
+    if (item.type === 'message') for (const c of item.content || []) if (c.type === 'output_text') r.text += c.text;
+  }
   let parsed;
   try { parsed = extractJSON(r.text); } catch { parsed = { facts: [], summary: r.text.slice(0, 600) }; }
   const items = (parsed.facts || []).filter((f) => f && f.claim).slice(0, 14).map((f, i) => ({
@@ -133,18 +150,44 @@ const PALETTE_RULES = `Each palette has colors {bg, surface, text, muted, accent
 - surface is a card colour slightly offset from bg; accent2 and accent3 are clearly different from accent and each other
 - suited to a data/infographic video: calm background, 1 strong accent, 2 supporting accents`;
 
+function hex6(v) {
+  const s = String(v || '').trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(s)) return s;
+  if (/^#[0-9a-f]{3}$/.test(s)) return '#' + s.slice(1).split('').map((x) => x + x).join('');
+  return null;
+}
+function mix(a, b, t) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return '#' + pa.map((x, i) => Math.round(x + (pb[i] - x) * t).toString(16).padStart(2, '0')).join('');
+}
+/** Accept short hex and fill in derivable colours; null if the core colours are missing. */
+export function normalizePalette(colors) {
+  const c = {};
+  for (const k of COLOR_KEYS) c[k] = hex6(colors && colors[k]);
+  if (!c.bg || !c.text || !c.accent) return null;
+  c.surface = c.surface || mix(c.bg, c.text, 0.07);
+  c.muted = c.muted || mix(c.text, c.bg, 0.4);
+  c.accent2 = c.accent2 || mix(c.accent, c.text, 0.35);
+  c.accent3 = c.accent3 || mix(c.accent, c.bg, 0.35);
+  return c;
+}
+
 export function scorePalette(c) {
   return { text: +contrast(c.text, c.bg).toFixed(1), muted: +contrast(c.muted, c.bg).toFixed(1), accent: +contrast(c.accent, c.bg).toFixed(1) };
 }
 
 export async function suggestPalettes(p, direction, opts) {
   const user = `${briefBlock(p)}\n${direction ? `Owner's direction: ${direction}\n` : ''}\nPropose 3 distinct colour palettes for this infographic.\n${PALETTE_RULES}\nReturn JSON: {"palettes":[{"name":"short name","colors":{...},"why":"one short sentence in ${langOf(p)}"}]}`;
-  const r = await json([{ role: 'system', content: 'You are a brand and data-visualisation colour designer. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, ...opts });
-  return (r.palettes || []).filter((x) => validPalette(x.colors)).slice(0, 4).map((x) => ({
-    name: String(x.name || 'Palette').slice(0, 40),
-    colors: Object.fromEntries(COLOR_KEYS.map((k) => [k, x.colors[k].toLowerCase()])),
-    why: String(x.why || '').slice(0, 200),
-  }));
+  const r = await json([{ role: 'system', content: 'You are a brand and data-visualisation colour designer. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, json: true, ...opts });
+  const list = (Array.isArray(r) ? r : r.palettes || []).map((x) => ({ x, colors: normalizePalette(x && (x.colors || x)) }))
+    .filter((y) => y.colors).slice(0, 4).map(({ x, colors }) => ({
+      name: String(x.name || 'Palette').slice(0, 40),
+      colors,
+      why: String(x.why || '').slice(0, 200),
+    }));
+  if (!list.length) throw new Error('The model returned no usable palettes. Try again.');
+  return list;
 }
 
 export async function paletteFromSite(p, url, opts) {
@@ -152,12 +195,13 @@ export async function paletteFromSite(p, url, opts) {
   if (!site.colors || !site.colors.length) throw new Error('No colours found on that page');
   const list = site.colors.map((c) => `${c.hex} (used ${c.n}x, chroma ${c.chroma})`).join('\n');
   const user = `Brand website: ${site.url} — "${site.title}"\nMost used colours on the site:\n${list}\n\n${briefBlock(p)}\n\nBuild ONE palette that clearly belongs to this brand (its main brand colour becomes accent; keep its light/dark feel unless it hurts readability).\n${PALETTE_RULES}\nReturn JSON: {"name":"short name","colors":{...},"why":"one short sentence in ${langOf(p)}"}`;
-  const r = await json([{ role: 'system', content: 'You are a brand colour designer. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, ...opts });
+  const r = await json([{ role: 'system', content: 'You are a brand colour designer. Reply with JSON only.' }, { role: 'user', content: user }], { thinking: false, json: true, ...opts });
   const x = r.colors ? r : (r.palette || r);
-  if (!validPalette(x.colors)) throw new Error('The model returned an invalid palette');
+  const colors = normalizePalette(x.colors || x);
+  if (!colors) throw new Error('The model returned an invalid palette');
   return {
     name: String(x.name || site.title || 'Brand').slice(0, 40),
-    colors: Object.fromEntries(COLOR_KEYS.map((k) => [k, x.colors[k].toLowerCase()])),
+    colors,
     why: String(x.why || '').slice(0, 200),
     site: site.url,
   };

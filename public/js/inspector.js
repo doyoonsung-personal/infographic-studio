@@ -152,15 +152,13 @@ const RENDER = {
     for (const pal of A.S.config.palettes || []) {
       body.append(h('div', { class: 'pal' + (st.paletteId === pal.id && !st.paletteName ? ' on' : ''), onclick: () => A.applyPalette({ ...pal, name: null }) }, h('span', {}, pal.name), swatch(pal.colors)));
     }
-    const ideas = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } });
+    // Ideas live in state: the inspector re-renders while the request runs.
+    const ideas = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, (A.S.paletteIdeas || []).map((pal) => paletteIdea(pal, A)));
     const dir = h('input', { type: 'text', placeholder: t('direction_ph') });
     body.append(h('div', { class: 'direction' },
       h('div', { class: 'lbl' }, t('suggest_palettes')),
       dir,
-      h('div', { class: 'row' }, h('span', { class: 'grow' }), busyBtn(A, 'style', t('suggest_palettes'), async () => {
-        const list = await A.suggestPalettes(dir.value.trim());
-        ideas.replaceChildren(...list.map((pal) => paletteIdea(pal, A)));
-      })),
+      h('div', { class: 'row' }, h('span', { class: 'grow' }), busyBtn(A, 'style', t('suggest_palettes'), () => A.suggestPalettes(dir.value.trim()))),
       ideas));
     const url = h('input', { type: 'url', placeholder: 'https://brand.example.com' });
     body.append(h('div', { class: 'direction' },
@@ -245,6 +243,7 @@ const RENDER = {
         h('div', { class: 'card-h' }, h('span', { class: 'pill s-' + (j.status === 'done' ? 'done' : j.status === 'failed' ? 'error' : 'running') }, label), h('b', {}, j.kind), h('span', { class: 'grow', style: { flex: 1 } }),
           j.sessionUrl ? h('a', { class: 'btn xs', href: j.sessionUrl, target: '_blank', rel: 'noopener' }, icon('link'), t('job_watch')) : null),
         j.error ? h('div', { class: 'err' }, j.error) : null,
+        j.status === 'fired' && Date.now() - j.createdAt > 12 * 60 * 1000 ? h('div', { class: 'warnbox' }, t('job_stalled')) : null,
         h('div', { class: 'joblog' }, (j.log || []).slice().reverse().map((l) => h('div', {}, `${new Date(l.at).toLocaleTimeString()}  ${l.msg}`)))));
     }
     if (S.versions.length) {

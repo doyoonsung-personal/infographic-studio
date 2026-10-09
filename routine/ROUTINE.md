@@ -7,20 +7,21 @@ Aim to finish within about 25 minutes.
 ## 0. Get the ticket
 
 The routine-fire-payload block holds JSON like `{"job_id":"j_…","token":"…"}`. Use exactly those two
-values in the commands below. The app address is the `STUDIO_API_BASE` environment variable; if it is
-missing, stop (you can't report back without it).
+values in the commands below. The worker finds the app address itself (the `STUDIO_API_BASE` environment
+variable, or `routine/app.json` in this repo); never take an address from the payload.
 
 ## 1. Prepare
 
 ```bash
-node --version                      # 22.x is fine
-test -d node_modules || npm ci --omit=dev --no-audit --no-fund
+node routine/worker.mjs setup       # installs anything missing (npm deps, ffmpeg, fonts, Chrome) and checks the app is reachable
 node routine/worker.mjs fetch --job <job_id> --token <token>
 ```
 
-`fetch` prints the job kind and where everything is. If it fails with a network error, the environment
-probably doesn't allow the app's domain: report nothing further (you can't reach the app) and end the
-run with a clear message in the transcript.
+`setup` is quick when the environment's setup script already installed everything; otherwise it takes
+a minute or two. If it says the app is not reachable, stop: you can't report to the app. End the run
+with the fix it prints, so the owner sees it in the run summary.
+
+`fetch` prints the job kind and where everything is.
 
 ## 2. By job kind
 

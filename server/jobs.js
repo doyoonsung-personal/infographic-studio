@@ -57,6 +57,12 @@ export async function createJob(env, body, origin) {
     baseComposition: base && base.files ? base.files['composition.html'] || null : null,
   });
 
+  if (body.manual === true) {
+    // The owner runs the worker on their own machine (e.g. with Claude Code); the token is shown once.
+    job.log.push({ at: Date.now(), msg: 'Manual job: run routine/worker.mjs yourself with this job id and token' });
+    await putJSON(env, 'job:' + id, job);
+    return { ...publicJob(job), token };
+  }
   if (env.ROUTINE_FIRE_URL && env.ROUTINE_TOKEN) {
     const fired = await fireRoutine(env, { job_id: id, token, app: origin });
     if (fired.ok) {
@@ -133,6 +139,14 @@ export async function authWorker(env, request, id) {
 }
 
 export async function workerBundle(env, job) {
+  if (job.status === 'fired' || job.status === 'queued') {
+    // First contact: tells the owner the routine reached the app (network and token are fine).
+    job.status = 'running';
+    job.stage = 'connected';
+    job.log.push({ at: Date.now(), msg: 'Routine connected to the app' });
+    job.updatedAt = Date.now();
+    await putJSON(env, 'job:' + job.id, job);
+  }
   const snap = (await getJSON(env, 'jobsnap:' + job.id)) || {};
   const composition = snap.baseComposition ? await getBlobText(env, snap.baseComposition) : null;
   const versions = job.projectId ? (await getJSON(env, 'versions:' + job.projectId)) || [] : [];

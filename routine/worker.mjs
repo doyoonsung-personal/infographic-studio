@@ -43,8 +43,12 @@ function die(msg) {
 }
 
 function apiBase() {
-  const b = process.env.STUDIO_API_BASE;
-  if (!b) die('STUDIO_API_BASE is not set. It must be the app address, e.g. https://infographic-studio.pages.dev');
+  // The address comes from the environment or from routine/app.json in this repo, never from the job payload.
+  let b = process.env.STUDIO_API_BASE;
+  if (!b) {
+    try { b = JSON.parse(fs.readFileSync(path.join(ROOT, 'routine', 'app.json'), 'utf8')).apiBase; } catch {}
+  }
+  if (!b) die('No app address: set STUDIO_API_BASE or routine/app.json apiBase');
   const u = new URL(b);
   if (u.protocol !== 'https:' && !/^(localhost|127\.0\.0\.1)$/.test(u.hostname)) die('STUDIO_API_BASE must be https');
   return u.origin;
@@ -88,6 +92,56 @@ async function status(id, message, stage) {
 
 function readJSON(f) { return JSON.parse(fs.readFileSync(f, 'utf8')); }
 function writeJSON(f, v) { fs.writeFileSync(f, JSON.stringify(v, null, 2)); }
+
+/* ---------- setup: make sure the tools exist (no-op when the environment's setup script ran) ---------- */
+async function cmdSetup() {
+  const { spawnSync } = await import('node:child_process');
+  const { findChrome, ffmpegPath } = await import('./lib/tools.mjs');
+  const sh = (cmd) => {
+    const r = spawnSync('bash', ['-lc', cmd], { stdio: 'inherit' });
+    return r.status === 0;
+  };
+  const root = typeof process.getuid === 'function' && process.getuid() === 0;
+  const sudo = root ? '' : 'sudo -n ';
+  const lines = [];
+
+  if (!fs.existsSync(path.join(ROOT, 'node_modules', 'playwright-core'))) {
+    lines.push('npm deps: installing');
+    sh(`cd "${ROOT}" && npm ci --omit=dev --no-audit --no-fund --loglevel=error`);
+  }
+  const hasFfmpeg = spawnSync(ffmpegPath(), ['-version']).status === 0;
+  const hasFonts = process.platform !== 'linux' || spawnSync('bash', ['-lc', 'fc-list | grep -qi "Noto Sans CJK"']).status === 0;
+  if (process.platform === 'linux' && (!hasFfmpeg || !hasFonts)) {
+    lines.push('apt: installing ffmpeg + fonts + Chrome libraries (about a minute)');
+    sh(`export DEBIAN_FRONTEND=noninteractive; ${sudo}apt-get update -qq && ${sudo}apt-get install -y -qq --no-install-recommends ffmpeg fonts-noto-cjk fonts-noto-color-emoji libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 >/dev/null`);
+  }
+  if (!findChrome() && process.platform === 'linux') {
+    lines.push('chrome: installing Chrome for Testing headless shell');
+    sh(`${sudo}mkdir -p /opt/chrome && ${sudo}npx -y @puppeteer/browsers install chrome-headless-shell@stable --path /opt/chrome >/dev/null`);
+  }
+  const ok = {
+    node: process.version,
+    ffmpeg: spawnSync(ffmpegPath(), ['-version']).status === 0,
+    chrome: Boolean(findChrome()) || process.platform === 'win32',
+    playwright: fs.existsSync(path.join(ROOT, 'node_modules', 'playwright-core')),
+  };
+  // Can we reach the app? (The routine environment must allow its domain.)
+  let reach = 'unknown';
+  try {
+    const r = await fetch(apiBase() + '/api/health');
+    reach = r.ok ? 'ok' : `HTTP ${r.status} ${r.headers.get('x-deny-reason') || ''}`.trim();
+  } catch (e) { reach = 'error: ' + e.message; }
+  ok.app = reach;
+  for (const l of lines) console.log(l);
+  console.log('SETUP ' + JSON.stringify(ok));
+  if (reach !== 'ok') {
+    console.log(`\nThe app at ${apiBase()} is not reachable from this environment (${reach}).` +
+      `\nFix: in the routine's cloud environment settings, set Network access to Custom and add "${new URL(apiBase()).host}" to Allowed domains (keep the default list ticked).` +
+      `\nYou cannot report this to the app; end the run with this message so the owner sees it.`);
+    process.exitCode = 3;
+  }
+  if (!ok.ffmpeg || !ok.chrome || !ok.playwright) process.exitCode = process.exitCode || 4;
+}
 
 /* ---------- fetch ---------- */
 async function cmdFetch() {
@@ -479,7 +533,7 @@ async function cmdStatus() {
   console.log('ok');
 }
 
-const COMMANDS = { fetch: cmdFetch, check: cmdCheck, render: cmdRender, upload: cmdUpload, complete: cmdComplete, fail: cmdFail, status: cmdStatus };
+const COMMANDS = { setup: cmdSetup, fetch: cmdFetch, check: cmdCheck, render: cmdRender, upload: cmdUpload, complete: cmdComplete, fail: cmdFail, status: cmdStatus };
 if (!COMMANDS[cmd]) {
   console.log('usage: node routine/worker.mjs <fetch|status|check|render|upload|complete|fail> --job <id> [...]');
   process.exit(cmd ? 1 : 0);

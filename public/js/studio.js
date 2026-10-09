@@ -44,7 +44,7 @@ export function normalize(p, config) {
 export async function openStudio(root, projectId, app) {
   const S = {
     p: null, config: app.config, me: app.me, versions: [], job: null,
-    sel: null, busy: {}, comp: null, nodeEls: {}, destroyed: false,
+    sel: null, busy: {}, progress: {}, comp: null, nodeEls: {}, destroyed: false,
   };
   S.p = normalize(await api('projects/' + projectId), S.config);
 
@@ -62,6 +62,7 @@ export async function openStudio(root, projectId, app) {
     h('button', { 'data-t': 'nodes', class: 'on', onclick: () => setTab('nodes') }, t('tab_nodes')));
   root.replaceChildren(studio, tabs);
   function setTab(x) {
+    if (S.sel) A.select(null); // the inspector is a full-screen sheet on phones
     studio.dataset.tab = x;
     tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === x));
   }
@@ -170,6 +171,13 @@ export async function openStudio(root, projectId, app) {
     return 'empty';
   }
 
+  let progressRaf = 0;
+  function progress(key, msg) {
+    S.progress[key] = msg;
+    cancelAnimationFrame(progressRaf);
+    progressRaf = requestAnimationFrame(() => renderNode(key));
+  }
+
   /* ---------- history ---------- */
   function pushHistory(key, value) {
     const list = S.p.history[key] || (S.p.history[key] = []);
@@ -193,6 +201,7 @@ export async function openStudio(root, projectId, app) {
         throw e;
       } finally {
         S.busy[key] = false;
+        S.progress[key] = null;
         renderCanvas();
         if (S.sel === key) renderInsp();
       }
@@ -219,7 +228,7 @@ export async function openStudio(root, projectId, app) {
 
     async research(focus) {
       return A.busy('facts', async () => {
-        const r = await ai.researchFacts(S.p, focus);
+        const r = await ai.researchFacts(S.p, focus, { onProgress: (m) => progress('facts', m) });
         if (!r.items.length) throw new Error(r.summary || 'No facts found');
         if (S.p.facts.items.length) pushHistory('facts', S.p.facts);
         S.p.facts = { ...S.p.facts, ...r, skipped: false };
@@ -230,7 +239,7 @@ export async function openStudio(root, projectId, app) {
 
     async writeScript(direction, sceneId) {
       return A.busy('script', async () => {
-        const r = await ai.writeScript(S.p, { direction, sceneId });
+        const r = await ai.writeScript(S.p, { direction, sceneId, onDelta: ({ content, reasoning }) => progress('script', content ? '✍ ' + content.length : '🧠 ' + reasoning.length) });
         if (S.p.script.scenes.length) pushHistory('script', S.p.script.scenes);
         if (r.scene) {
           const i = S.p.script.scenes.findIndex((s) => s.id === sceneId);
@@ -286,7 +295,11 @@ export async function openStudio(root, projectId, app) {
       A.applyLive();
     },
     async suggestPalettes(direction) {
-      return A.busy('style', () => ai.suggestPalettes(S.p, direction));
+      return A.busy('style', async () => {
+        const list = await ai.suggestPalettes(S.p, direction);
+        S.paletteIdeas = list;
+        return list;
+      });
     },
     async paletteFromSite(url) {
       return A.busy('style', async () => {
@@ -616,6 +629,7 @@ export async function openStudio(root, projectId, app) {
         break;
       }
     }
+    if (S.busy[key] && S.progress[key]) body.push(h('div', { class: 'line mono' }, S.progress[key]));
     B.replaceChildren(...body.filter(Boolean));
     F.replaceChildren(...foot.filter(Boolean));
   }

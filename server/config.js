@@ -25,9 +25,9 @@ export const DEFAULT_CONFIG = {
     { id: 'warm-earth', name: 'Warm Earth', colors: { bg: '#2a1f1a', surface: '#3a2c24', text: '#fbf3ea', muted: '#c2ad9c', accent: '#f2a541', accent2: '#e76f51', accent3: '#8ab17d' } },
   ],
   models: {
-    chat: 'qwen3.8-flash',
+    chat: 'qwen3.8-max',
     writer: 'qwen3.8-max',
-    research: 'qwen3.8-max',
+    research: 'qwen3.8-flash',
     tts: 'eleven_multilingual_v2',
     music: 'music_v2_5',
   },
