@@ -68,6 +68,19 @@ If it stalls, the app now says so after 12 min, and I can read the run log for y
   - **Moving backgrounds:** any background image can be animated with HappyHorse 1.1 i2v or Wan 2.7 i2v (`server/video.js`, async task + poll; clip stored in KV). The preview gets the video bytes by postMessage. The worker cuts each clip into JPEG frames, and the runtime shows the exact frame for each t (`stageSettle()`).
   - **Costs** (2026-10-09 catalog): cut-out about $0.03–0.04 each; clip $0.14/s at 720P (HappyHorse), so a 6 s clip is about $0.84.
   - **Tests:** `test/local-collage.mjs` (free, synthetic). `test/e2e-collage.mjs` and `test/e2e-collage-build.mjs` are paid, live-app end-to-end tests. Test project: p_Su-4X_Z_eBSK.
+- **My own photos in cut-outs** (내 사진 올리기), added 2026-10-10: for real people or products that can't be generated.
+  - Upload from the Cut-outs panel (button, per-scene button, or drop on a scene card). The original is kept (JPEG ≤ 2400 px), so the cut-out can be redone.
+  - **Modes**, all on the device, free, never redrawn:
+    - **인물 컷아웃 (Person):** MODNet portrait matting. 25 MB model on first use, about 2 s per photo after that.
+    - **사물 컷아웃 (Object):** keys out a plain backdrop (white wall, plain cloth) instantly. It refuses busy backgrounds with a message.
+    - **사진 그대로 (Photo as is):** keeps the rectangle.
+  - **Looks:** 원본 색 (original) / 흑백 망점 (halftone) / 빛바랜 컬러 (faded), so a real photo sits with collage cut-outs.
+  - The build brief marks these as the owner's photos: never cover a face, never flip a person or a label.
+  - A general object model (BiRefNet) was tried and dropped: it ran out of browser memory and exceeded the GPU limits on this laptop.
+- **KV writes** (2026-10-10, after a 90% warning: 937 of 1,000 on Oct 9):
+  - Autosave waits for 4 s of quiet (at most 15 s), skips unchanged saves, and saves when the tab is hidden.
+  - Build progress lines in the same stage are stored at most every 30 s.
+  - Uploaded build files no longer rewrite the job record.
 - **Fallback:** Claude 빌드 → "고급: 이 PC에서 직접 빌드" creates a manual job and gives you text to paste into Claude Code on this PC.
 - Dev notes: [CLAUDE.md](CLAUDE.md). Design contract for the builder: [docs/COMPOSITION.md](docs/COMPOSITION.md).
 
@@ -84,5 +97,5 @@ If it stalls, the app now says so after 12 min, and I can read the run log for y
 - The cloud routine works end to end as of 2026-10-09 (project p_sVkbiB20ZaJB, v1–v5).
 - `check` fails on on-screen Chinese characters that aren't in the brief/script/facts (ko/en projects).
 - Research takes 2–3 minutes (Qwen searches several times); progress shows in the 팩트 node.
-- KV free plan: files ≤ 25 MB (videos are capped at ~24 MB by the renderer), 1,000 writes/day.
+- KV free plan: files ≤ 25 MB (videos are capped at ~24 MB by the renderer), 1,000 writes/day (resets 09:00 KST).
 - Ideas: image generation for scene assets (Qwen-Image), 9:16 re-composition of an existing build, per-scene re-renders.

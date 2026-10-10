@@ -17,9 +17,10 @@ export async function del(env, key) {
   await env.STUDIO_KV.delete(key);
 }
 
-/** Store a blob from bytes or a stream. Returns its id. */
+/** Store a blob from bytes or a stream. Returns its id (extra.id picks a fixed one, e.g. per build file). */
 export async function putBlob(env, body, type, extra = {}) {
-  const id = newId('b_');
+  const id = extra.id || newId('b_');
+  if (!/^b_[\w-]+$/.test(id)) fail(400, 'bad blob id');
   const size = body && typeof body.byteLength === 'number' ? body.byteLength : extra.size || null;
   if (size != null && size > MAX_BLOB) fail(413, `file too large (${Math.round(size / 1048576)} MB, limit 25 MB)`);
   await env.STUDIO_KV.put('blob:' + id, body, {

@@ -28,7 +28,8 @@ with `{job_id, token}` → the routine calls `/api/worker/...` with the per-job 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\dev.ps1          # local server on :8788 (local KV)
 node test/ui-shot.mjs work/ui /p/<id>                              # UI screenshots with headless Edge
-node --test test/                                                  # unit tests
+node --test "test/*.test.mjs"                                      # unit tests (a bare directory fails)
+node test/local-upload.mjs <photo> person,object,photo --look none,halftone   # "Upload my photo" in the UI (free)
 node scripts/push.mjs "message"                                    # push working tree to GitHub (GITHUB_TOKEN)
 npx wrangler pages deploy --project-name infographic-studio --branch main   # deploy (CLOUDFLARE_* env)
 ```
@@ -39,4 +40,10 @@ Portable Node lives in `.tools/` (gitignored); ffmpeg via `FFMPEG_PATH`.
 
 - Match the surrounding style: small modules, `h()` DOM helper, no framework, no bundler.
 - Compositions must stay deterministic (see `public/js/lint.js`); never add real-time APIs to the runtime.
-- KV free plan: 25 MiB per value, 1,000 writes/day — debounce writes, keep blobs under 24.5 MB.
+- KV free plan: 25 MiB per value, 1,000 writes/day (resets 09:00 KST) — keep blobs under 24.5 MB and
+  count writes when adding a feature. Current budget savers: project autosave waits for 4 s of quiet
+  (at most 15 s), skips unchanged bodies and flushes when the tab is hidden; the worker's same-stage
+  status lines are stored at most every 30 s; build files go under fixed ids (`fileBlobId`) and are
+  collected with one KV list at completion instead of rewriting the job per file.
+- Owner photo cut-outs run in the browser: `segment-worker.js` (MODNet, WASM only — WebGPU gave a broken
+  matte on Intel Arc) for people, `plainKey()` in `cutout.js` for objects on plain backgrounds.

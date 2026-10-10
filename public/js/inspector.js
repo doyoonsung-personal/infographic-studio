@@ -58,6 +58,17 @@ function seg(options, value, onpick) {
   return h('div', { class: 'seg' }, options.map(([v, label]) =>
     h('button', { class: v === value ? 'on' : '', onclick: (e) => { e.currentTarget.parentElement.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); onpick(v); } }, label)));
 }
+/** Open the file picker for one image (phones offer the camera and gallery). */
+function pickImage(onfile) {
+  const inp = h('input', { type: 'file', accept: 'image/*', style: { display: 'none' } });
+  inp.addEventListener('change', () => { const f = inp.files && inp.files[0]; inp.remove(); if (f) onfile(f); });
+  document.body.append(inp);
+  inp.click();
+}
+/** A progress line the studio updates in place (see progress() in studio.js). */
+function progressLine(A, key) {
+  return A.S.busy[key] ? h('div', { class: 'line mono', 'data-progress': key }, A.S.progress[key] || '…') : null;
+}
 function busyBtn(A, key, label, fn, cls = 'btn primary', ic = 'wand') {
   const running = A.S.busy[key];
   return h('button', { class: cls, disabled: running, onclick: async () => { try { await fn(); } catch {} } },
@@ -196,33 +207,56 @@ const RENDER = {
     body.append(field(t('cutout_style'), seg([['halftone', t('cut_halftone')], ['color', t('cut_color')], ['paper', t('cut_paper')]], p.assets.style, (v) => A.setAssetStyle(v))));
     const model = (A.S.config.models && A.S.config.models.image) || 'qwen-image-3.0';
     const each = { 'z-image-turbo': 0.015, 'qwen-image-max': 0.075 }[model] ?? 0.04;
-    const missing = items.filter((a) => !a.blobId && a.subject);
+    const missing = items.filter((a) => !a.blobId && a.subject && !a.upload);
     body.append(h('div', { class: 'row wrap' },
       busyBtn(A, 'assets', items.length ? t('assets_replan') : t('assets_plan'), () => A.planAssets(), 'btn', 'wand'),
       missing.length ? busyBtn(A, 'assets', t('assets_generate', { n: missing.length }), () => A.generateAssets(), 'btn primary', 'scissors') : null,
-      missing.length ? h('span', { class: 'hint' }, `≈ $${(missing.length * each).toFixed(2)} · ${model}`) : null));
+      missing.length ? h('span', { class: 'hint' }, `≈ $${(missing.length * each).toFixed(2)} · ${model}`) : null,
+      h('span', { class: 'grow' }),
+      h('button', { class: 'btn', disabled: A.S.busy.assets || !p.script.scenes.length, title: t('asset_upload_hint'), onclick: () => pickImage((f) => A.uploadAsset(f, {}).catch(() => {})) }, icon('upload'), t('asset_upload'))));
+    body.append(progressLine(A, 'assets') || '');
+    const busy = Boolean(A.S.busy.assets);
+    const upload = (opts) => pickImage((f) => A.uploadAsset(f, opts).catch(() => {}));
     const scenes = p.script.scenes;
     for (const s of scenes) {
       const mine = items.filter((a) => a.sceneId === s.id);
       const box = h('div', { class: 'card' }, h('div', { class: 'card-h' }, h('span', { class: 'sid' }, s.id), h('b', { class: 'grow' }, s.title || ''),
+        h('button', { class: 'btn xs ghost', title: t('asset_upload_hint'), disabled: busy, onclick: () => upload({ sceneId: s.id }) }, icon('upload')),
         h('button', { class: 'btn xs ghost', title: t('asset_add'), onclick: () => A.addAsset({ sceneId: s.id }) }, icon('plus'))));
+      // a photo dropped on the scene's card becomes one of its cut-outs
+      box.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); box.classList.add('drop'); } });
+      box.addEventListener('dragleave', () => box.classList.remove('drop'));
+      box.addEventListener('drop', (e) => {
+        e.preventDefault(); box.classList.remove('drop');
+        const f = [...e.dataTransfer.files].find((x) => /^image\//.test(x.type));
+        if (f && !busy) A.uploadAsset(f, { sceneId: s.id }).catch(() => {});
+      });
       if (!mine.length) box.append(h('div', { class: 'hint' }, t('assets_none')));
       for (const a of mine) {
-        const pic = a.blobId ? h('img', { src: blobUrl(a.blobId), alt: a.name, class: 'cut-thumb' }) : h('div', { class: 'cut-thumb empty' }, a.error ? '!' : '—');
+        const pic = a.blobId ? h('img', { src: blobUrl(a.blobId), alt: a.name, class: 'cut-thumb' + (a.upload && a.upload.mode === 'photo' ? ' photo' : '') }) : h('div', { class: 'cut-thumb empty' }, a.error ? '!' : '—');
+        const own = a.upload
+          ? h('div', { class: 'own' + (busy ? ' off' : '') },
+            seg([['person', t('up_mode_person')], ['object', t('up_mode_object')], ['photo', t('up_mode_photo')]], a.upload.mode, (v) => A.processAsset(a.id, { mode: v }).catch(() => {})),
+            seg([['none', t('up_look_none')], ['halftone', t('up_look_halftone')], ['faded', t('up_look_faded')]], a.upload.look, (v) => A.processAsset(a.id, { look: v }).catch(() => {})))
+          : null;
         box.append(h('div', { class: 'cut-row' },
           pic,
           h('div', { class: 'grow', style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 } },
             h('div', { class: 'row' },
+              a.upload ? h('span', { class: 'tag own-tag', title: a.upload.name || '' }, t('up_tag')) : null,
               h('input', { type: 'text', value: a.name || '', placeholder: t('asset_name'), style: { flex: 1, padding: '4px 8px' }, oninput: (e) => A.updateAsset(a.id, { name: e.target.value, _typing: true }) }),
               h('code', { class: 'mono', title: t('asset_id_hint'), style: { fontSize: '10.5px', color: 'var(--faint)' } }, a.id)),
-            h('textarea', { rows: 2, placeholder: t('asset_subject'), oninput: (e) => A.updateAsset(a.id, { subject: e.target.value, _typing: true }) }, a.subject || ''),
+            h('textarea', { rows: 2, placeholder: t(a.upload ? 'asset_subject_own' : 'asset_subject'), oninput: (e) => A.updateAsset(a.id, { subject: e.target.value, _typing: true }) }, a.subject || ''),
+            own,
             a.error ? h('div', { class: 'err' }, /green net|content filter/i.test(a.error) ? t('content_blocked') : a.error) : null),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
-            h('button', { class: 'btn xs icon', title: a.blobId ? t('regen') : t('generate'), disabled: A.S.busy.assets || !a.subject, onclick: () => A.generateAssets([a.id]).catch(() => {}) }, icon(a.blobId ? 'refresh' : 'scissors')),
+            a.upload ? null : h('button', { class: 'btn xs icon', title: a.blobId ? t('regen') : t('generate'), disabled: busy || !a.subject, onclick: () => A.generateAssets([a.id]).catch(() => {}) }, icon(a.blobId ? 'refresh' : 'scissors')),
+            h('button', { class: 'btn xs icon', title: t(a.upload ? 'asset_replace_photo' : 'asset_use_photo'), disabled: busy, onclick: () => upload({ id: a.id }) }, icon('upload')),
             h('button', { class: 'btn xs icon ghost', title: t('remove'), onclick: () => A.removeAsset(a.id) }, icon('trash')))));
       }
       body.append(box);
     }
+    if (items.some((a) => a.upload)) body.append(h('div', { class: 'hint' }, t('up_note')));
     body.append(h('div', { class: 'hint' }, t('assets_footer')));
   },
 

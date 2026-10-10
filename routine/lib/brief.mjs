@@ -73,7 +73,13 @@ function lookSection(project, tl) {
     L.push('');
     L.push('| id | scene | what | size | file |');
     L.push('|---|---|---|---|---|');
-    for (const a of cuts) L.push(`| ${a.id} | ${a.sceneId} | ${cell(a.name, 60)} — ${cell(a.subject, 140)} | ${a.w || '?'}×${a.h || '?'} | assets/${a.id}.* |`);
+    const own = (a) => !a.upload ? '' : a.upload.mode === 'photo' ? "**owner's photo, rectangular** — " : "**owner's photo, cut out** — ";
+    for (const a of cuts) L.push(`| ${a.id} | ${a.sceneId} | ${own(a)}${cell(a.name, 60)}${a.subject ? ' — ' + cell(a.subject, 140) : ''} | ${a.w || '?'}×${a.h || '?'} | assets/${a.id}.* |`);
+    if (cuts.some((a) => a.upload)) {
+      L.push('');
+      L.push("Rows marked **owner's photo** are real photos the owner uploaded (real people, products). Use them as they are: never cover a face, never flip a person or a label, and don't crop through the subject. Give them a prominent spot in their scene.");
+      if (cuts.some((a) => a.upload && a.upload.mode === 'photo')) L.push('The rectangular ones are framed photos, not silhouettes: `.c-cutout` gives them a printed-photo border; you may crop their edges with `object-fit: cover` on a sized box, keeping the subject whole.');
+    }
   }
   if (clips.length) {
     L.push('', `**Moving backgrounds:** ${clips.join(', ')} ${clips.includes('all') ? '(one clip shared by all scenes)' : ''} — the background image of these scenes is a short video the stage plays automatically under the scrim. Design exactly as for background images; don't cover it with opaque full-scene panels.`);

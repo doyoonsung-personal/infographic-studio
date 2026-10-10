@@ -229,9 +229,16 @@ export async function workerBundle(env, job) {
   return { job: publicJob(job), project: snap.project, baseComposition: composition, baseVersion: base, baseProject };
 }
 
+// Each KV write counts toward the free plan's 1,000 a day, so progress lines within the same stage are
+// stored at most every 30 s (stage changes always are). The worker only reads the reply's status.
+const STATUS_GAP_MS = 30 * 1000;
+
 export async function workerStatus(env, job, body) {
   const msg = String(body.message || '').slice(0, 400);
   const stage = String(body.stage || job.stage || 'running').slice(0, 40);
+  if (job.status === 'running' && stage === job.stage && Date.now() - (job.updatedAt || 0) < STATUS_GAP_MS) {
+    return publicJob(job);
+  }
   job.status = 'running';
   job.stage = stage;
   if (body.sessionUrl && /^https:\/\/claude\.ai\//.test(body.sessionUrl)) job.sessionUrl = body.sessionUrl;
@@ -242,18 +249,31 @@ export async function workerStatus(env, job, body) {
   return publicJob(job);
 }
 
+/** A build file's blob id is fixed per job and file name, so completion can find it without a job write per upload. */
+export const fileBlobId = (jobId, name) => `b_${jobId}_${name.replace(/\W/g, '_')}`;
+
 export async function workerFile(env, job, name, request) {
   const type = FILE_NAMES[name];
   if (!type) fail(400, 'unknown file name');
   const len = Number(request.headers.get('content-length')) || null;
-  const blobId = await putBlob(env, len ? request.body : await request.arrayBuffer(), type, { name, size: len });
-  job.files[name] = blobId;
-  job.updatedAt = Date.now();
-  await putJob(env, job);
+  const blobId = await putBlob(env, len ? request.body : await request.arrayBuffer(), type, { name, size: len, id: fileBlobId(job.id, name) });
   return { blobId };
 }
 
+/** The files uploaded for a job: one KV list instead of rewriting the job record after every upload. */
+async function uploadedFiles(env, job) {
+  const files = { ...(job.files || {}) };
+  const keys = await listAll(env, 'blob:' + fileBlobId(job.id, ''), 50);
+  const have = new Set(keys.map((k) => k.name.slice(5)));
+  for (const name of Object.keys(FILE_NAMES)) {
+    const id = fileBlobId(job.id, name);
+    if (have.has(id)) files[name] = id;
+  }
+  return files;
+}
+
 export async function workerComplete(env, job, body) {
+  job.files = await uploadedFiles(env, job);
   job.status = 'done';
   job.stage = 'done';
   job.notes = String(body.notes || '').slice(0, 4000);

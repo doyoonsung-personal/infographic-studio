@@ -11,7 +11,8 @@ import * as ai from './ai.js';
 import { Player } from './player.js';
 import { renderInspector } from './inspector.js';
 import { mountChat } from './chat.js';
-import { makeCutout } from './cutout.js';
+import { makeCutout, shrinkPhoto, cutoutFromMask, photoAsset, plainBackgroundMask } from './cutout.js';
+import { segmentPerson } from './segment.js';
 
 export const NODES = [
   { key: 'brief', icon: 'brief' },
@@ -76,15 +77,26 @@ export async function openStudio(root, projectId, app) {
   }
 
   /* ---------- saving ---------- */
-  const saveNow = async () => {
+  // Every save is one KV write, and the free plan allows 1,000 a day across the whole app. So: wait for
+  // 4 s of quiet (but never sit on unsaved work longer than 15 s), skip saves that change nothing, and
+  // save right away when the tab is hidden or the project is left.
+  const bodyKey = (p) => JSON.stringify({ ...p, rev: undefined, updatedAt: undefined, chat: p.chat.slice(-40) });
+  let savedKey = bodyKey(S.p), firstUnsaved = 0, saveTimer = null;
+  const saveNow = async ({ keepalive = false } = {}) => {
+    clearTimeout(saveTimer); saveTimer = null; firstUnsaved = 0;
     if (S.destroyed) return;
+    const key = bodyKey(S.p);
+    if (key === savedKey) { S.dirty = false; app.setSaveState('saved'); return; }
     app.setSaveState('saving');
     try {
       const body = { ...S.p, chat: S.p.chat.slice(-40) };
-      const r = await api('projects/' + S.p.id, { method: 'PUT', body });
+      // keepalive lets the request finish while the page closes (the browser caps it at 64 KB)
+      const r = await api('projects/' + S.p.id, { method: 'PUT', body, keepalive: keepalive && key.length < 60000 });
       S.p.rev = r.rev;
-      S.dirty = false;
-      app.setSaveState('saved');
+      savedKey = key;
+      S.dirty = bodyKey(S.p) !== savedKey;
+      app.setSaveState(S.dirty ? 'dirty' : 'saved');
+      if (S.dirty) save();
     } catch (e) {
       app.setSaveState('error');
       if (e instanceof ApiError && e.status === 409) {
@@ -92,7 +104,13 @@ export async function openStudio(root, projectId, app) {
       } else app.toast(t('save_failed') + ': ' + e.message, 'err');
     }
   };
-  const save = debounce(saveNow, 900);
+  function save() {
+    if (!firstUnsaved) firstUnsaved = Date.now();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, Math.max(0, Math.min(4000, firstUnsaved + 15000 - Date.now())));
+  }
+  const onHidden = () => { if (document.visibilityState === 'hidden' && saveTimer) saveNow({ keepalive: true }); };
+  document.addEventListener('visibilitychange', onHidden);
   function changed({ canvas: c = true, inspector = false, preview = false } = {}) {
     S.dirty = true;
     app.setSaveState('dirty');
@@ -208,6 +226,7 @@ export async function openStudio(root, projectId, app) {
   let progressRaf = 0;
   function progress(key, msg) {
     S.progress[key] = msg;
+    for (const el of insp.querySelectorAll(`[data-progress="${key}"]`)) el.textContent = msg;
     cancelAnimationFrame(progressRaf);
     progressRaf = requestAnimationFrame(() => renderNode(key));
   }
@@ -423,7 +442,7 @@ export async function openStudio(root, projectId, app) {
       if (!S.p.script.scenes.length) throw new Error(t('assets_need_script'));
       return A.busy('assets', async () => {
         const plan = await ai.planCutouts(S.p);
-        const kept = S.p.assets.items.filter((a) => a.blobId);
+        const kept = S.p.assets.items.filter((a) => a.blobId || a.upload);
         S.p.assets.items = [...kept, ...plan.map((x) => ({ id: uid('a_'), ...x }))];
         changed({ inspector: S.sel === 'assets' });
         return { planned: plan.length };
@@ -450,9 +469,83 @@ export async function openStudio(root, projectId, app) {
       changed({ inspector: S.sel === 'assets' });
     },
 
+    /**
+     * The owner's own photo (a real person or product can't be generated). The original is stored, then
+     * processed into the picture Claude places. Pass id to put the photo on an existing (planned) cut-out.
+     */
+    async uploadAsset(file, { sceneId, id } = {}) {
+      if (!file || !/^image\//.test(file.type)) throw new Error(t('upload_not_image'));
+      if (S.busy.assets) return;
+      let a = id ? S.p.assets.items.find((x) => x.id === id) : null;
+      const created = !a;
+      if (!a) a = A.addAsset({ sceneId, name: file.name.replace(/\.[^.]+$/, '').slice(0, 40) });
+      try {
+        await A.busy('assets', async () => {
+          progress('assets', t('up_uploading'));
+          const small = await shrinkPhoto(file);
+          const up = await api('blobs', { method: 'POST', raw: true, body: small.blob, headers: { 'content-type': 'image/jpeg', 'x-file-name': a.id + '-original.jpg' } });
+          // default look follows the project's cut-out style so the photo matches the generated ones
+          const look = { halftone: 'halftone', color: 'faded' }[S.p.assets.style] || 'none';
+          a.upload = { blobId: up.blobId, w: small.width, h: small.height, mode: 'person', look, name: String(file.name).slice(0, 80) };
+          changed({ inspector: S.sel === 'assets' });
+        });
+      } catch (e) {
+        if (created && !a.upload) A.removeAsset(a.id);
+        throw e;
+      }
+      if (a.upload) await A.processAsset(a.id);
+      return a;
+    },
+
+    /**
+     * Turn an uploaded photo into its picture, on this device (free; the photo keeps its own pixels):
+     * 'person' = portrait matting model, 'object' = plain background keyed away, 'photo' = the rectangle.
+     * look: none/halftone/faded.
+     */
+    async processAsset(id, patch = {}) {
+      const a = S.p.assets.items.find((x) => x.id === id);
+      if (!a || !a.upload || S.busy.assets) return;
+      const before = { mode: a.upload.mode, look: a.upload.look };
+      if (patch.mode && ['person', 'object', 'photo'].includes(patch.mode)) a.upload.mode = patch.mode;
+      if (patch.look && ['none', 'halftone', 'faded'].includes(patch.look)) a.upload.look = patch.look;
+      const same = a.upload.mode === before.mode && a.upload.look === before.look;
+      if ((patch.mode || patch.look) && same && a.blobId && !a.error) return;
+      return A.busy('assets', async () => {
+        try {
+          const { mode, look } = a.upload;
+          progress('assets', t('seg_running'));
+          const src = await (await fetch(blobUrl(a.upload.blobId), { credentials: 'same-origin' })).blob();
+          let out;
+          if (mode === 'photo') out = await photoAsset(src, { look });
+          else {
+            const m = mode === 'object'
+              ? await plainBackgroundMask(src)
+              : await segmentPerson(src, (d) => {
+                if (d.progress && d.progress.total > 1e6) progress('assets', `${t('seg_download')} ${Math.round((d.progress.done / d.progress.total) * 100)}%`);
+                else if (d.stage) progress('assets', t('seg_running'));
+              });
+            if (mode === 'object' && !m.ok) throw new Error(t('seg_busy'));
+            out = await cutoutFromMask(src, m.mask, m.width, m.height, { look });
+            if (!out.blob || out.coverage < 0.005) throw new Error(t('seg_nothing'));
+          }
+          const up = await api('blobs', { method: 'POST', raw: true, body: out.blob, headers: { 'content-type': out.blob.type, 'x-file-name': a.id + (out.blob.type === 'image/webp' ? '.webp' : out.blob.type === 'image/png' ? '.png' : '.jpg') } });
+          Object.assign(a, { blobId: up.blobId, source: a.upload.blobId, w: out.width, h: out.height, at: Date.now() });
+          delete a.error;
+        } catch (e) {
+          a.error = String(e.message || e).slice(0, 300);
+          // the picture is still the last good one, so the switches go back to what made it
+          if (a.blobId && a.source === a.upload.blobId) Object.assign(a.upload, before);
+          throw e;
+        } finally {
+          changed({ inspector: S.sel === 'assets', preview: true });
+        }
+      });
+    },
+
     /** Generate cut-out pictures (paid: one image each), remove their green background, store them. */
     async generateAssets(ids) {
-      const items = S.p.assets.items.filter((a) => a.subject && (ids && ids.length ? ids.includes(a.id) : !a.blobId));
+      // the owner's photos are never replaced by generated ones
+      const items = S.p.assets.items.filter((a) => a.subject && !a.upload && (ids && ids.length ? ids.includes(a.id) : !a.blobId));
       if (!items.length) return { generated: 0 };
       return A.busy('assets', async () => {
         let n = 0;
@@ -1123,8 +1216,9 @@ export async function openStudio(root, projectId, app) {
   return {
     destroy() {
       clearTimeout(pollTimer);
-      if (S.dirty) saveNow();
+      if (S.dirty) saveNow({ keepalive: true });
       S.destroyed = true;
+      document.removeEventListener('visibilitychange', onHidden);
       ro.disconnect();
       window.removeEventListener('resize', onResize);
       mainPlayer.destroy();

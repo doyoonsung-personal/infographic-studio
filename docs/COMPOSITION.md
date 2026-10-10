@@ -82,6 +82,10 @@ BRIEF.md lists cut-outs (transparent pictures of single subjects) with ids. Plac
 with `transform: rotate(-4deg)`, and animate it like any element (`data-a="pop"`, `data-cue`…). The files
 are in `work/<job>/assets/`: open them with the Read tool to see what each one shows.
 
+Some are the **owner's own photos** (BRIEF.md marks them): real people or products. Use them unaltered and
+prominently; never cover a face or mirror a person or a label. A few are rectangular photos rather than
+cut-outs; place those like printed photos (`.c-cutout` gives them a white border too).
+
 ## Collage toolkit
 
 Classes and attributes for the collage look (always available; BRIEF.md says when the look is collage,

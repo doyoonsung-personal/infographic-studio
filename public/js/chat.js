@@ -268,7 +268,7 @@ export function mountChat(root, A) {
         return { ok: true, planned: r ? r.planned : 0, cutouts: S.p.assets.items.map((x) => `${x.sceneId}: ${x.name}`) };
       }
       case 'generate_cutouts': {
-        const todo = S.p.assets.items.filter((x) => !x.blobId && x.subject);
+        const todo = S.p.assets.items.filter((x) => !x.blobId && x.subject && !x.upload);
         if (!todo.length) throw new Error('no cut-outs to generate; call plan_cutouts first');
         return confirmCard(t('assets_generate', { n: todo.length }), todo.map((x) => x.name).join(', '), () => A.generateAssets());
       }

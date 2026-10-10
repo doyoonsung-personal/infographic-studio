@@ -48,6 +48,7 @@ const ICONS = {
   wand: '<path d="M15 4V2M15 10V8M11 6h2M17 6h2M4 20l10-10 2 2-10 10z"/>',
   scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.6 7.6L20 18M8.6 16.4L20 6"/>',
   film: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
 };
 
 export function icon(name, cls = 'i') {

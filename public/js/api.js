@@ -7,8 +7,8 @@ export class ApiError extends Error {
 let onUnauthorized = () => {};
 export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 
-export async function api(path, { method = 'GET', body, raw, signal, headers } = {}) {
-  const opts = { method, headers: { ...(headers || {}) }, signal, credentials: 'same-origin' };
+export async function api(path, { method = 'GET', body, raw, signal, headers, keepalive } = {}) {
+  const opts = { method, headers: { ...(headers || {}) }, signal, credentials: 'same-origin', keepalive: Boolean(keepalive) };
   if (body !== undefined) {
     if (raw) opts.body = body;
     else { opts.body = JSON.stringify(body); opts.headers['content-type'] = 'application/json'; }
