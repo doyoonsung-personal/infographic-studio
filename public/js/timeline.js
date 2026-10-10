@@ -129,6 +129,11 @@ export function contentKey(project) {
   if (p.style && p.style.look && p.style.look !== 'default') parts.push(['look', p.style.look]);
   const cut = ((p.assets && p.assets.items) || []).filter((a) => a.blobId);
   if (cut.length) parts.push(cut.map((a) => [a.id, a.sceneId, a.name]));
+  // Extra features that change the design (only when they differ from the defaults, so older versions
+  // keep their keys): camera on, GSAP off, background motion off.
+  const ex = p.extras || {};
+  const on = (k) => Boolean(ex[k] && ex[k].enabled);
+  if (on('camera') || (ex.gsap && !on('gsap')) || (ex.ambient && !on('ambient'))) parts.push(['extras', on('camera'), on('gsap'), on('ambient')]);
   const s = JSON.stringify(parts);
   let h1 = 2166136261, h2 = 5381;
   for (let i = 0; i < s.length; i++) {

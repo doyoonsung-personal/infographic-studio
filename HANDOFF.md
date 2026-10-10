@@ -62,6 +62,12 @@ If it stalls, the app now says so after 12 min, and I can read the run log for y
   - **그래픽 유지 (Keep graphics):** a `render` job, or a `revise` job when there's a request or the brief/facts/script changed since the version. The worker gets `previous.html` plus a "Changed since vN" list built from that version's job snapshot.
   - **전부 새로 만들기 (Remake all):** a `build` job. It never gets the previous composition, because given one, Claude copied it byte for byte.
   - Each version stores a `contentKey` (`contentKey()` in `public/js/timeline.js`), so the app can show when the content has moved on.
+- **Extra features (추가 기능 step, before the build)**, added 2026-10-10. Switches live in `project.extras`; the brief tells Claude which are on.
+  - **Sound effects** (default off): the shared library (KV `sfxlib`) is made once with ElevenLabs sound generation (`/api/sfx`, presets in `server/eleven.js`). The runtime places automatic and `data-sfx` events (`stageInfo().sfx`). The preview plays them, and the worker mixes them (`routine/lib/audio.mjs`).
+  - **Background motion** (default on): `data-ambient` presets (particles, glow, grid, waves, gradient) and automatic camera breathing. The worker's `check` fails any 1.5 s stretch where nothing moves (`stageSignature()` sampled every 0.25 s).
+  - **Camera moves** (default off): `data-cam` keyframes inside scenes, and camera transitions push, push-up, zoom-in (into `data-focus`), zoom-out, whip, circle and morph (`data-share`). `data-depth` gives parallax.
+  - **GSAP** (default on): GSAP 3.15 core and plugins vendored in `public/vendor/gsap/gsap-bundle.js` (Standard "no charge" license). It is inlined only when a composition uses `STAGE_TIMELINES`. Paused timelines are seeked by the stage.
+  - **Test:** `test/local-extras.mjs` (free) renders all of it locally.
 - **Collage look (Vox-style)**, added 2026-10-09:
   - **Style → 룩 (look):** sets `style.look = 'collage'` and the paper palette. The stage gets paper texture and moving grain. Claude designs with the collage toolkit (`docs/COMPOSITION.md`) and follows `docs/looks/collage.md`.
   - **Step 5 컷아웃 (Cut-outs):** Qwen plans subjects per scene, and Qwen-Image draws each one on flat green. `public/js/cutout.js` then keys it out in the browser (flood fill from the border, de-spill) and saves a WebP with alpha. Compositions use `<img data-asset="id">`.

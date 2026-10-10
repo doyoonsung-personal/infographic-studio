@@ -53,9 +53,97 @@ Rules for the fragment:
 
 - `<section class="scene" data-scene="ID">` for every timeline row, in order. The runtime places each scene
   in its time window (from `timeline.json`) and positions it `absolute; inset: 0`.
-- `data-transition`: `fade` (default, 0.5 s crossfade), `cut`, `slide` (pushes left), `zoom`.
+- `data-transition`: `fade` (default, 0.5 s crossfade), `cut`, `slide` (pushes left), `zoom`, and the
+  camera transitions in "Camera and transitions" below.
 - Static jobs: one `<section class="scene" data-scene="page">`. Motion attributes resolve to their final
   state, so you can still use them, but nothing moves.
+
+## Camera and transitions
+
+Use these when BRIEF.md says camera moves are on.
+
+**Camera transitions:** put them on the ENTERING scene. The outgoing scene moves with it, so both read as
+one camera move. They take 0.8 s around the scene boundary (`whip` 0.4 s).
+
+| `data-transition` | What the viewer sees |
+|---|---|
+| `push` / `push-up` | the camera pans right (up) to the next scene, like one long strip. Layers with `data-depth` move at their own speed: `0.5` (far, lags), `1` (with the scene), `1.4` (near, leads) |
+| `zoom-in` | the camera dives into the previous scene's `data-focus` element (a CSS selector on that scene, e.g. `data-focus="#map"`); the new scene grows out of it |
+| `zoom-out` | the previous scene shrinks away and the new one settles in from close up |
+| `whip` | a fast whip pan with motion blur |
+| `circle` | the new scene opens as a circle from the previous scene's `data-focus` point |
+| `morph` | quick crossfade while every `[data-share="key"]` element glides from where the same key sat in the previous scene (position and size). Give the arriving copy no entrance of its own |
+
+**Camera inside a scene:** `data-cam` on the `<section>` sets keyframes. Each is `time: zoom cx cy`, which
+centres stage point (cx, cy), or `time: #selector zoom`, which centres that element. Times are scene
+seconds or cues (`c2`, `c2+0.3`). A keyframe is where the camera **arrives**, and it eases between keys.
+To hold still and then move, repeat a key:
+`data-cam="0: 1 960 540; c2: 1 960 540; c2+0.9: #big-number 1.7; c3: #big-number 1.7; c3+0.8: 1 960 540"`
+holds the wide shot until cue 2, pushes in on the number, then pulls back after cue 3. Make sure what the
+camera arrives at has already appeared. Lay a scene out larger than the frame and pan across it for a
+"one world" feel. Keep text readable at every zoom.
+
+## Background motion
+
+When BRIEF.md says background motion is on, every scene keeps something moving for its whole length. The
+stage adds a slow camera push to scenes without `data-cam`, but that doesn't count for `check`, which fails
+any 1.5 s stretch where nothing in the composition moves.
+
+- `<div data-ambient="KIND"></div>` fills its parent (absolute, inset 0, behind if you give it
+  `z-index:-1`) and moves by itself, on the global clock, so the same kind flows on across scenes:
+  - `particles`: drifting dots in the accent colours (`data-n="46"`)
+  - `glow`: soft light blobs wandering (`data-n="3"`)
+  - `grid`: a slowly scrolling line grid (`data-cell="80"`, `data-tilt` for a perspective floor)
+  - `waves`: flowing sine lines (`data-n="3"`)
+  - `gradient`: a slowly turning tinted gradient
+
+  All take `data-speed="1"`.
+- Secondary pieces: `data-loop="float|pulse|spin|sway"`, `data-drift="x,y"`, `data-boil`.
+- Keep ambient motion quiet (low contrast, slow), so it never competes with the hero.
+
+## Shared timing: GSAP timelines
+
+When BRIEF.md says GSAP is on, the stage loads GSAP 3 with SplitText, CustomEase, DrawSVGPlugin,
+MorphSVGPlugin and MotionPathPlugin. Describe motion as one paused timeline per scene; time 0 is the scene
+start and the stage moves the playhead, so every frame is exact:
+
+```html
+<script>
+window.STAGE_TIMELINES = {
+  s2: (tl, c) => {
+    const split = SplitText.create(c.q('.headline')[0], { type: 'lines,words', mask: 'lines' });
+    tl.from(split.lines, { yPercent: 110, duration: 0.7, ease: 'expo.out', stagger: 0.08 }, c.cue(1) ?? 0.3)
+      .from(c.q('.bar'), { scaleY: 0, transformOrigin: '50% 100%', stagger: 0.06, ease: 'back.out(1.6)' }, '<0.2')
+      .to(c.q('#icon-a'), { morphSVG: '#icon-b', duration: 0.8, ease: 'power2.inOut' }, c.cue(2) ?? 2)
+      .to(c.q('.orb'), { y: -12, duration: 1.6, ease: 'sine.inOut', yoyo: true, repeat: 5 }, 0);   // ambient loop
+  },
+};
+</script>
+```
+
+- `c.q(selector)` finds inside the scene, `c.cue(n)` gives a narration cue time (or null), and `c.len`,
+  `c.W`, `c.H` and `c.rand(seed)` are there too (seeded random only).
+- Never use `Math.random`, `gsap.utils.random`, string `"random(...)"` values, `delayedCall`, `ScrollTrigger`
+  or `onUpdate` side effects that depend on real time.
+- Don't animate the scene `<section>` itself, and don't drive the same property of one element with both
+  GSAP and data-* attributes.
+- Text bound with `data-text` can be split; the stage re-splits after the owner edits the text.
+
+## Sound effects
+
+When BRIEF.md says sound effects are on:
+
+- **Automatic sounds:**
+  - every non-`cut` transition gets a whoosh or swoosh
+  - `data-a="pop"` entrances get a pop (a paper sound in the collage look)
+  - counters get a tick
+  - marker strokes and highlighter swipes get a marker sound
+  - at most four automatic sounds per scene
+- **Your own sounds:** `data-sfx="name"` on an element plays at its entrance; `data-sfx-at="c2"` or
+  `data-sfx-at="1.4"` sets the time. On a `<section>` it plays at the scene start.
+- **Silence:** `data-sfx="none"` silences an element's automatic sound, or the scene's transition sound.
+- **Names:** the library in BRIEF.md (whoosh, swoosh, pop, click, tick, ding, riser, paper, marker, type).
+  Use `riser` before a big reveal and `ding` on the key number.
 
 ## Background images
 

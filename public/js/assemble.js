@@ -26,7 +26,7 @@ export const DEFAULT_COLORS = {
  * Identifies the pictures a render was made with (colours, font, background images and clips, cut-out
  * images), so the app can tell when a re-render would change the video.
  */
-export function styleKey(style, assets) {
+export function styleKey(style, assets, extras) {
   const st = style || {};
   const c = st.colors || {};
   const keys = Object.keys(c).sort();
@@ -38,6 +38,9 @@ export function styleKey(style, assets) {
   }
   const made = ((assets && assets.items) || []).filter((a) => a.blobId);
   if (made.length) out.a = made.map((a) => [a.id, a.blobId]);
+  // Sound effects are added at render time, so switching them changes the file but not the design.
+  const fx = extras && extras.sfx;
+  if (fx && fx.enabled) out.x = [fx.auto !== false ? 1 : 0, fx.volume ?? 1];
   return JSON.stringify(out);
 }
 
@@ -95,6 +98,7 @@ const COLLAGE_CSS = `
 .c-clipping{position:relative;background-color:#fbf8f0;background-image:var(--paper);color:#1d1b18;font-family:'Noto Serif KR','Noto Serif CJK KR',Georgia,serif;padding:30px 38px;-webkit-mask-image:var(--torn);mask-image:var(--torn);-webkit-mask-size:100% 100%;mask-size:100% 100%}
 .c-label{display:inline-block;background:var(--text);color:var(--bg);padding:.1em .38em .14em;font-weight:900;line-height:1.1;box-shadow:6px 7px 0 rgba(0,0,0,.18)}
 .c-marker{fill:none;stroke:var(--accent2);stroke-width:7;stroke-linecap:round;stroke-linejoin:round}
+[data-ambient]{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 [data-hl]{background-image:linear-gradient(100deg,transparent .15em,color-mix(in srgb,var(--accent) 88%,transparent) .3em calc(100% - .2em),transparent calc(100% - .05em));background-repeat:no-repeat;background-position:0 78%;background-size:0% 46%;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 `;
 
@@ -116,6 +120,8 @@ function esc(s) {
  *   assets   - cut-out images {assetId: url} for <img data-asset="id">
  *   clips    - moving backgrounds {sceneId | 'all': {dur, frames?, n?, fps?}}: with frames (renderer) the
  *              runtime shows numbered JPEGs; without (preview) it plays a video the player sends in
+ *   extras   - the owner's extra-feature switches {sfx, ambient, camera, gsap} (see project.extras)
+ *   libs     - library source inlined before the runtime (GSAP, when the composition uses it)
  *   webFonts - include the Google Fonts link (default true)
  */
 export function assembleDocument(fragment, o = {}) {
@@ -128,7 +134,7 @@ export function assembleDocument(fragment, o = {}) {
   const look = o.look === 'collage' ? 'collage' : '';
   const cfg = {
     timeline: tl, colors, font, texts: o.texts || {}, images: o.images || {}, bg: { strength: o.bgStrength ?? 0.45 },
-    look, assets: o.assets || {}, clips: o.clips || {},
+    look, assets: o.assets || {}, clips: o.clips || {}, extras: o.extras || {},
   };
   const fontsLink = o.webFonts === false ? '' :
     `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="${FONT_LINK}">`;
@@ -149,6 +155,11 @@ ${COLLAGE_CSS}
 </head><body><div id="stage"${tl.static ? ' data-static' : ''}${look ? ` data-look="${look}"` : ''}>
 ${fragment}
 </div>
-<script>${o.runtime || ''}</script>
+${o.libs ? `<script>${o.libs}</script>\n` : ''}<script>${o.runtime || ''}</script>
 </body></html>`;
+}
+
+/** Does a composition drive GSAP timelines (so the document needs the GSAP bundle)? */
+export function usesGsap(fragment) {
+  return /STAGE_TIMELINES|\bgsap\.|SplitText|MorphSVGPlugin|DrawSVGPlugin|MotionPathPlugin|CustomEase/.test(String(fragment || ''));
 }

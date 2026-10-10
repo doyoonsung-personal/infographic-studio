@@ -196,3 +196,30 @@ test('brief: collage look lists the toolkit, cut-outs and moving backgrounds', (
   assert.ok(ch.some((l) => l.startsWith('- Look: was "default"')));
   assert.ok(ch.some((l) => l.startsWith('- Cut-out added: a_1')));
 });
+test('brief: extra features section follows the switches', () => {
+  const tl = { static: false, width: 1920, height: 1080, duration: 5, fps: 30, scenes: [{ id: 's1', start: 0, end: 5, len: 5, cues: {} }] };
+  const base = { brief: { topic: 'x' }, facts: { items: [] }, script: { scenes: [{ id: 's1', narration: 'hi' }] }, style: { colors: {} } };
+  const on = { ...base, extras: { sfx: { enabled: true }, ambient: { enabled: true }, camera: { enabled: true }, gsap: { enabled: true } } };
+  const b = writeBrief({ job: { id: 'j1', kind: 'build' }, project: on, timeline: tl, sfxNames: ['whoosh', 'pop'] });
+  assert.ok(b.includes('**Background motion: ON.**'));
+  assert.ok(b.includes('**Camera moves: ON.**'));
+  assert.ok(b.includes('**GSAP: ON.**'));
+  assert.ok(b.includes('Library: whoosh, pop'));
+  const off = { ...base, extras: { sfx: { enabled: false }, ambient: { enabled: false }, camera: { enabled: false }, gsap: { enabled: false } } };
+  const b2 = writeBrief({ job: { id: 'j2', kind: 'build' }, project: off, timeline: tl });
+  assert.ok(b2.includes('Camera moves: off') && b2.includes('GSAP: off') && !b2.includes('Sound effects: ON'));
+  const ch = contentChanges({ ...base, extras: off.extras }, on);
+  assert.ok(ch.some((l) => l.startsWith('- Camera moves: turned ON')));
+});
+
+test('extras: camera/GSAP/ambient switches are design changes, sound effects only a render change', () => {
+  const p = { brief: { topic: 'x' }, facts: { items: [] }, script: { scenes: [] } };
+  const defaults = { sfx: { enabled: false }, ambient: { enabled: true }, camera: { enabled: false }, gsap: { enabled: true } };
+  const k0 = contentKey(p);
+  assert.equal(contentKey({ ...p, extras: defaults }), k0, 'default switches keep older keys');
+  assert.notEqual(contentKey({ ...p, extras: { ...defaults, camera: { enabled: true } } }), k0);
+  assert.notEqual(contentKey({ ...p, extras: { ...defaults, gsap: { enabled: false } } }), k0);
+  assert.equal(contentKey({ ...p, extras: { ...defaults, sfx: { enabled: true } } }), k0);
+  const st = { colors: { a: '1' }, font: 'sans' };
+  assert.notEqual(styleKey(st, null, { sfx: { enabled: true } }), styleKey(st, null, { sfx: { enabled: false } }));
+});

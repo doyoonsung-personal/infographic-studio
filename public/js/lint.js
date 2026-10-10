@@ -10,6 +10,9 @@ const JS_RULES = [
   [/Math\s*\.\s*random/, 'Math.random is banned: use ctx.rand(seed) inside a hook'],
   [/\bfetch\s*\(|XMLHttpRequest|\bimport\s*\(|^\s*import\s/m, 'network/module loading is not allowed'],
   [/\.animate\s*\(/, 'Element.animate (Web Animations) runs on real time: banned'],
+  // GSAP: timelines are fine (the stage seeks them); anything random or clock-driven is not.
+  [/gsap\s*\.\s*utils\s*\.\s*random|["'`]random\(/, 'GSAP random values are banned: use c.rand(seed)'],
+  [/delayedCall|ScrollTrigger|gsap\s*\.\s*ticker/, 'GSAP delayedCall / ScrollTrigger / ticker run on real time: put everything on the scene timeline'],
 ];
 
 const CSS_RULES = [

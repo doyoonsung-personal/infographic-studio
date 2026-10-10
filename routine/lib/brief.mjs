@@ -50,7 +50,36 @@ export function contentChanges(base, project) {
   for (const x of newA) if (!oldA.has(x.id)) out.push(`- Cut-out added: ${x.id} (${x.sceneId}, "${cell(x.name, 60)}"); place it`);
   const newIds = new Set(newA.map((x) => x.id));
   for (const id of oldA) if (!newIds.has(id)) out.push(`- Cut-out removed: ${id}; take it out of the composition`);
+  const on = (x, k) => Boolean(x && x[k] && x[k].enabled);
+  for (const [k, label] of [['ambient', 'Background motion'], ['camera', 'Camera moves'], ['gsap', 'GSAP timelines'], ['sfx', 'Sound effects']]) {
+    if (on(base.extras, k) !== on(project.extras, k)) out.push(`- ${label}: turned ${on(project.extras, k) ? 'ON' : 'off'} (see "Extra features")`);
+  }
   return out;
+}
+
+/** The owner's extra-feature switches (lines of markdown). */
+function extrasSection(project, tl, sfxNames) {
+  const ex = project.extras || {};
+  const on = (k) => Boolean(ex[k] && ex[k].enabled);
+  if (tl.static) return [];
+  const L = ['', '## Extra features (the owner\'s switches) — details in docs/COMPOSITION.md'];
+  if (on('ambient')) {
+    L.push('- **Background motion: ON.** Nothing may sit frozen: every scene keeps something alive for its whole length (a `data-ambient` background, `data-loop` / `data-drift` / `data-boil` on secondary pieces, a `data-cam` move or a looping GSAP tween). `check` FAILS any stretch of 1.5 s where nothing in the composition moves. The stage also gives every scene without `data-cam` a slow camera push.');
+  }
+  if (on('camera')) {
+    L.push('- **Camera moves: ON.** Make it feel like one continuous world, not slides: use the camera transitions (`push`, `push-up`, `zoom-in` into the previous scene\'s `data-focus` element, `zoom-out`, `whip`, `circle`, `morph` with `data-share` pieces) for most scene changes, `data-depth` on layers for parallax during pushes, and `data-cam` moves inside longer scenes (zoom to the detail being spoken about on its cue, then pull back). Vary them; keep `fade` for calm moments.');
+  } else {
+    L.push('- Camera moves: off. Use the basic transitions (fade, cut, slide, zoom) and no `data-cam`.');
+  }
+  if (on('gsap')) {
+    L.push('- **GSAP: ON.** For motion beyond the data-* attributes write `window.STAGE_TIMELINES = { s1: (tl, c) => { … } }` (see "GSAP timelines"): SplitText line/word/char reveals, CustomEase curves, MorphSVG icon morphs, MotionPath arcs, staggered grids. Keep it deterministic (no random, no time callbacks) and don\'t animate the same property of an element with both GSAP and data-*.');
+  } else {
+    L.push('- GSAP: off. Animate with the data-* attributes and hooks only.');
+  }
+  if (on('sfx')) {
+    L.push(`- **Sound effects: ON.** Transitions get a whoosh and pops / counters / marker strokes get sounds automatically. Add \`data-sfx="name"\` on 1–3 key moments per scene (timed with the element's entrance, or \`data-sfx-at="c2"\`), and \`data-sfx="none"\` to silence an element. Library: ${(sfxNames && sfxNames.length ? sfxNames : ['whoosh', 'swoosh', 'pop', 'click', 'tick', 'ding', 'riser', 'paper', 'marker', 'type']).join(', ')}. Don't overdo it: sounds should mark moments, not every element.`);
+  }
+  return L.length > 2 ? L : [];
 }
 
 /** The collage look, cut-outs and moving backgrounds (lines of markdown; empty when none apply). */
@@ -87,7 +116,7 @@ function lookSection(project, tl) {
   return L;
 }
 
-export function writeBrief({ job, project, timeline: tl, hasPrevious, baseProject, baseVersion }) {
+export function writeBrief({ job, project, timeline: tl, hasPrevious, baseProject, baseVersion, sfxNames }) {
   const b = project.brief || {};
   const st = project.style || {};
   const facts = (project.facts && project.facts.items) || [];
@@ -162,6 +191,7 @@ export function writeBrief({ job, project, timeline: tl, hasPrevious, baseProjec
     L.push('- Background: colours only (no images).');
   }
   L.push(...lookSection(project, tl));
+  L.push(...extrasSection(project, tl, sfxNames));
 
   if (!tl.static) {
     L.push('');

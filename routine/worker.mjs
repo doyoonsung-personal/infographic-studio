@@ -16,7 +16,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { computeTimeline, peakTime, FPS } from '../public/js/timeline.js';
-import { assembleDocument, styleKey } from '../public/js/assemble.js';
+import { assembleDocument, styleKey, usesGsap } from '../public/js/assemble.js';
 import { lintComposition, checkScenes } from '../public/js/lint.js';
 import { launchBrowser, ffmpeg, ffmpegFrameSink, probeDuration } from './lib/tools.mjs';
 import { writeBrief } from './lib/brief.mjs';
@@ -24,6 +24,7 @@ import { mixAudio } from './lib/audio.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUNTIME = fs.readFileSync(path.join(ROOT, 'public/runtime/stage.js'), 'utf8');
+const GSAP_FILE = path.join(ROOT, 'public/vendor/gsap/gsap-bundle.js');
 const MAX_UPLOAD = 24.5 * 1024 * 1024;
 const PINNED_CHROME = '131.0.6778.85'; // Chrome for Testing build used when "stable" can't be resolved
 
@@ -236,8 +237,19 @@ async function cmdFetch() {
     }
   }
 
+  // Sound effects: the shared library (made once in the app), mixed in at render time.
+  let nSfx = 0;
+  if (bundle.sfxLibrary) {
+    fs.mkdirSync(path.join(dir, 'sfx'), { recursive: true });
+    for (const [name, s] of Object.entries(bundle.sfxLibrary)) {
+      if (!s || !s.blobId || !/^[a-z][a-z0-9-]*$/.test(name)) continue;
+      await download(id, s.blobId, path.join(dir, 'sfx', name + '.mp3'));
+      nSfx++;
+    }
+  }
+
   const briefPath = path.join(dir, 'BRIEF.md');
-  fs.writeFileSync(briefPath, writeBrief({ job, project, timeline: tl, hasPrevious: Boolean(bundle.baseComposition), baseProject: bundle.baseProject || null, baseVersion: bundle.baseVersion || null, dir }));
+  fs.writeFileSync(briefPath, writeBrief({ job, project, timeline: tl, hasPrevious: Boolean(bundle.baseComposition), baseProject: bundle.baseProject || null, baseVersion: bundle.baseVersion || null, dir, sfxNames: bundle.sfxLibrary ? Object.keys(bundle.sfxLibrary) : [] }));
   await status(id, job.kind === 'render' ? 'Re-rendering with your edits' : 'Claude is designing the infographic', 'designing');
 
   console.log(`Fetched job ${id} (${job.kind}).`);
@@ -246,6 +258,7 @@ async function cmdFetch() {
   if (bundle.baseComposition) console.log(`  previous:    ${rel(path.join(dir, 'previous.html'))}`);
   console.log(`  narration:   ${n} clip(s)${m && m.enabled && m.track ? ', music: yes' : ''}${nImages ? `, background images: ${nImages}` : ''}${nClips ? `, moving backgrounds: ${nClips}` : ''}`);
   if (cuts.length) console.log(`  cut-outs:    ${cuts.length} in ${rel(path.join(dir, 'assets'))} (open them with the Read tool to see what they show)`);
+  if (nSfx) console.log(`  sound fx:    ${nSfx} sounds (${sfxFiles(dir).join(', ')})`);
   console.log(`  write to:    ${rel(path.join(dir, 'composition.html'))}`);
   if (job.kind === 'render') console.log('  (render job: composition.html already copied from the previous version; keep the design, update text only as BRIEF.md says, then check + render)');
   if (job.kind === 'build') console.log('  (build job: REMAKE ALL from scratch; there is no previous version to copy)');
@@ -285,7 +298,16 @@ function docFor(ctx) {
     look: st.look,
     assets: assetFiles(ctx.dir),
     clips: bg.mode === 'image' ? clipFrames(ctx.dir, ctx.timeline) : {},
+    extras: ctx.project.extras || {},
+    libs: usesGsap(ctx.fragment) ? fs.readFileSync(GSAP_FILE, 'utf8') : '',
   });
+}
+
+/** work/<job>/sfx/<name>.mp3 -> [names] (the shared sound-effect library, when sound effects are on). */
+function sfxFiles(dir) {
+  const d = path.join(dir, 'sfx');
+  if (!fs.existsSync(d)) return [];
+  return fs.readdirSync(d).filter((f) => /^[a-z][a-z0-9-]*\.mp3$/.test(f)).map((f) => f.slice(0, -4));
 }
 
 function imageExt(buf) {
@@ -444,6 +466,40 @@ async function cmdCheck() {
       }
     }
 
+    // Dead air: stretches where nothing in the composition moves (the automatic camera breathing and
+    // film grain don't count). An error when the owner turned "background motion" on.
+    const ex = ctx.project.extras || {};
+    if (!tl.static && tl.duration > 0) {
+      const strict = Boolean(ex.ambient && ex.ambient.enabled);
+      const step = 0.25;
+      const sigs = await page.evaluate(({ D, step }) => {
+        const out = [];
+        for (let t = 0; t <= D + 1e-6; t += step) { window.seek(+t.toFixed(3)); out.push([+t.toFixed(3), window.stageSignature ? window.stageSignature() : '']); }
+        return out;
+      }, { D: tl.duration, step });
+      const frozen = [];
+      let runStart = 0;
+      for (let i = 1; i <= sigs.length; i++) {
+        if (i === sigs.length || sigs[i][1] !== sigs[i - 1][1]) {
+          const a = sigs[runStart][0], b = sigs[i - 1][0];
+          if (b - a >= 1.5 - 1e-6) frozen.push([a, b]);
+          runStart = i;
+        }
+      }
+      for (const [a, b] of frozen) {
+        const sc = tl.scenes.find((s) => a >= s.start - 0.01 && a < s.end) || tl.scenes[tl.scenes.length - 1] || {};
+        (strict ? report.errors : report.warnings).push(`${sc.id || '?'} ${a.toFixed(2)}–${b.toFixed(2)}s: nothing moves for ${(b - a).toFixed(1)}s; keep something alive (data-ambient, data-loop, data-drift, data-boil, data-cam or a GSAP loop)`);
+      }
+      report.frozen = frozen;
+    }
+    if (ex.sfx && ex.sfx.enabled) {
+      const have = new Set(sfxFiles(ctx.dir));
+      const ev = await page.evaluate(() => (window.stageInfo().sfx || []));
+      const missing = [...new Set(ev.map((e) => e.name).filter((n) => !have.has(n)))];
+      if (missing.length) report.warnings.push(`sound effects not in the library (they stay silent): ${missing.join(', ')}; available: ${[...have].join(', ') || 'none'}`);
+      report.sfx = ev.length;
+    }
+
     if (errors.length) report.errors.push(...[...new Set(errors)].slice(0, 10).map((e) => 'page: ' + e));
     await page.close();
 
@@ -573,9 +629,13 @@ async function cmdRender() {
     console.log(`  encoded ${frames} frames in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
     const poster = Math.min(D - 0.1, tl.scenes.length ? peakTime(tl.scenes[0]) : 1);
     fs.writeFileSync(path.join(outDir, 'poster.jpg'), await shot(page, Math.max(0.5, poster)));
+    const sfxEvents = await page.evaluate(() => (window.stageInfo().sfx || []));
     await page.close();
 
-    const mix = await mixAudio({ dir: ctx.dir, timeline: tl, project: ctx.project });
+    const have = new Set(sfxFiles(ctx.dir));
+    const sfx = sfxEvents.filter((e) => have.has(e.name)).map((e) => ({ ...e, file: path.join(ctx.dir, 'sfx', e.name + '.mp3') }));
+    if (sfx.length) console.log(`  sound effects: ${sfx.length} placed`);
+    const mix = await mixAudio({ dir: ctx.dir, timeline: tl, project: ctx.project, sfx });
     const final = path.join(outDir, 'video.mp4');
     if (mix) {
       await ffmpeg(['-i', silent, '-i', mix, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-t', D.toFixed(3), '-movflags', '+faststart', final]);
@@ -630,7 +690,7 @@ async function cmdUpload() {
     notes,
     duration: ctx.timeline.duration,
     textsUsed: (ctx.project.edits && ctx.project.edits.texts) || {},
-    styleKey: styleKey(st, ctx.project.assets),
+    styleKey: styleKey(st, ctx.project.assets, ctx.project.extras),
     report: report ? { ok: report.ok, errors: report.errors.slice(0, 10), warnings: report.warnings.slice(0, 20) } : null,
   });
   console.log(`Done. Version v${res.version ? res.version.v : '?'} is in the app.`);

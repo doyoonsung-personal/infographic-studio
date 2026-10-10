@@ -1,0 +1,6 @@
+﻿GSAP 3.15.0 (https://gsap.com), copied unmodified from the npm package `gsap@3.15.0` (dist/*.min.js)
+and concatenated into gsap-bundle.js: gsap core, CustomEase, SplitText, DrawSVGPlugin, MorphSVGPlugin,
+MotionPathPlugin.
+
+License: GSAP Standard "no charge" license, https://gsap.com/standard-license (free, including commercial
+use; proprietary notices must stay intact; not for no-code animation builders competing with Webflow).

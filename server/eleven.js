@@ -90,6 +90,37 @@ export async function music(env, body, config) {
   return { blobId, duration: lengthMs / 1000, modelId };
 }
 
+/* ---------- sound effects: a small shared library, made once and reused by every video ---------- */
+
+export const SFX_PRESETS = {
+  whoosh: { prompt: 'Fast smooth cinematic whoosh for a motion-graphics scene transition, clean and airy, no music, no voice', duration: 1.0 },
+  swoosh: { prompt: 'Short soft swoosh of a graphic sliding into place, subtle clean UI motion sound, no music', duration: 0.6 },
+  pop: { prompt: 'Soft playful pop of a graphic element appearing on screen, clean and short, no music', duration: 0.5 },
+  click: { prompt: 'Crisp subtle UI click, clean digital interface sound', duration: 0.5 },
+  tick: { prompt: 'Rapid light digital ticking of numbers counting up on a counter, clean, no music', duration: 1.2 },
+  ding: { prompt: 'Bright gentle chime for revealing a key number, clean and short, no music', duration: 1.0 },
+  riser: { prompt: 'Short soft cinematic riser building up before a reveal, clean, no music', duration: 1.5 },
+  paper: { prompt: 'A paper cut-out placed down on a desk: short paper rustle and a soft tap', duration: 0.6 },
+  marker: { prompt: 'Felt marker pen quickly drawing a stroke on paper, short squeak', duration: 0.8 },
+  type: { prompt: 'Short burst of soft keyboard typing', duration: 0.8 },
+};
+
+/** One sound effect from a text prompt -> { blobId, duration }. */
+export async function soundEffect(env, prompt, duration) {
+  const text = String(prompt || '').trim().slice(0, 450);
+  if (!text) fail(400, 'prompt required');
+  const secs = clamp(duration, 0.5, 10, 1);
+  const r = await fetch(`${API}/v1/sound-generation?output_format=mp3_44100_128`, {
+    method: 'POST',
+    headers: { 'xi-api-key': key(env), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, duration_seconds: secs, prompt_influence: 0.6 }),
+  });
+  if (!r.ok) await elevenError(r);
+  const buf = await r.arrayBuffer();
+  const blobId = await putBlob(env, buf, r.headers.get('content-type') || 'audio/mpeg', { name: 'sfx.mp3' });
+  return { blobId, duration: secs };
+}
+
 /** GET /api/eleven/voices -> the voices in the owner's ElevenLabs account. */
 export async function voices(env) {
   const out = [];

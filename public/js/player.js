@@ -1,7 +1,7 @@
 // Live preview: the composition runs in a sandboxed iframe; this player drives seek(t) and plays
 // the narration clips and music with Web Audio, ducking the music under the voice.
 
-import { assembleDocument } from './assemble.js';
+import { assembleDocument, usesGsap } from './assemble.js';
 import { h, icon, fmtTime } from './util.js';
 import { t as tr } from './i18n.js';
 
@@ -9,6 +9,11 @@ let runtimeSrc = null;
 async function runtime() {
   if (!runtimeSrc) runtimeSrc = await (await fetch('/runtime/stage.js')).text();
   return runtimeSrc;
+}
+let gsapSrc = null;
+async function gsapBundle() {
+  if (!gsapSrc) gsapSrc = await (await fetch('/vendor/gsap/gsap-bundle.js')).text();
+  return gsapSrc;
 }
 
 const bufferCache = new Map();
@@ -57,6 +62,9 @@ export class Player {
       if (m.type === 'stage-ready') {
         this.info = m.info;
         this.ready = true;
+        // Sound effects fall where the stage says (transitions, pops, counters, data-sfx).
+        this.sfx = (m.info.sfx || []).filter((e) => this.sfxLib && this.sfxLib[e.name]);
+        for (const e of this.sfx) loadBuffer(this.sfxLib[e.name]);
         this.sendClips();
         this.post({ type: 'seek', t: this.t });
         this.emit('ready', m.info);
@@ -104,11 +112,14 @@ export class Player {
     this.audio = { voices: opts.voices || [], music: opts.music || null };
     // Clip videos are too big for the document, so the stage gets them as bytes after it loads.
     this.clipBytes = opts.clipBytes || null;
+    this.sfxLib = opts.sfxLib || null;
+    this.sfx = [];
     const clips = {};
     for (const [k, c] of Object.entries(opts.clips || {})) clips[k] = { dur: c.dur };
     const doc = assembleDocument(opts.fragment, {
       runtime: await runtime(), timeline: tl, colors: opts.colors, font: opts.font, texts: opts.texts,
       images: opts.images, bgStrength: opts.bgStrength, look: opts.look, assets: opts.assets, clips,
+      extras: opts.extras, libs: usesGsap(opts.fragment) ? await gsapBundle() : '',
     });
     const f = document.createElement('iframe');
     f.setAttribute('sandbox', 'allow-scripts');
@@ -208,18 +219,32 @@ export class Player {
     if (this.t >= this.duration - 0.05) this.t = 0;
     this.playing = true;
     this.updateUi();
-    const hasAudio = this.audio.voices.length || this.audio.music;
+    const sfx = this.sfx || [];
+    const hasAudio = this.audio.voices.length || this.audio.music || sfx.length;
     if (hasAudio) {
       const ctx = audioCtx();
       await ctx.resume();
-      const [voiceBufs, musicBuf] = await Promise.all([
+      const [voiceBufs, musicBuf, sfxBufs] = await Promise.all([
         Promise.all(this.audio.voices.map((v) => loadBuffer(v.url))),
         this.audio.music ? loadBuffer(this.audio.music.url) : null,
+        Promise.all(sfx.map((e) => loadBuffer(this.sfxLib[e.name]))),
       ]);
       if (!this.playing) return;
       const now = ctx.currentTime + 0.05;
       const t0 = this.t;
       this.sources = [];
+      sfx.forEach((e, i) => {
+        const b = sfxBufs[i];
+        if (!b || e.t < t0 - 0.05) return;
+        const src = ctx.createBufferSource();
+        src.buffer = b;
+        const g = ctx.createGain();
+        g.gain.value = e.gain;
+        src.connect(g);
+        g.connect(ctx.destination);
+        src.start(now + Math.max(0, e.t - t0));
+        this.sources.push(src);
+      });
       this.audio.voices.forEach((v, i) => {
         const b = voiceBufs[i];
         // Play each clip only to just after its last spoken character, with a short fade:

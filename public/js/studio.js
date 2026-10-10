@@ -22,6 +22,7 @@ export const NODES = [
   { key: 'assets', icon: 'scissors' },
   { key: 'voice', icon: 'voice' },
   { key: 'music', icon: 'music' },
+  { key: 'extras', icon: 'wand' },
   { key: 'build', icon: 'build' },
   { key: 'preview', icon: 'preview', wide: true },
 ];
@@ -39,6 +40,14 @@ export function normalize(p, config) {
   p.style.background = { mode: 'color', scope: 'scene', look: 'photo', notes: '', strength: 0.45, images: {}, ...(p.style.background || {}) };
   p.style.look = p.style.look === 'collage' ? 'collage' : 'default';
   p.assets = { style: 'halftone', items: [], ...(p.assets || {}) };
+  // Extra features (step before the build): free ones on by default, the paid / restyling ones off.
+  const ex = p.extras || {};
+  p.extras = {
+    sfx: { enabled: false, auto: true, volume: 1, ...(ex.sfx || {}) },
+    ambient: { enabled: true, ...(ex.ambient || {}) },
+    camera: { enabled: false, ...(ex.camera || {}) },
+    gsap: { enabled: true, ...(ex.gsap || {}) },
+  };
   const firstVoice = (config.voices || []).find((v) => !v.language || v.language === p.brief.language) || (config.voices || [])[0];
   p.voice = { enabled: Boolean(firstVoice) && p.brief.format !== 'static', voiceRef: firstVoice ? firstVoice.id : null, speed: 1, clips: {}, ...(p.voice || {}) };
   const ms = (config.musicStyles || [])[0];
@@ -154,6 +163,18 @@ export async function openStudio(root, projectId, app) {
     return { keys, have: keys.length - missing.length, missing };
   }
 
+  /** Sound-effect presets that the shared library doesn't have yet. */
+  function sfxMissing() {
+    const lib = (S.sfx && S.sfx.library) || {};
+    return Object.keys((S.sfx && S.sfx.presets) || {}).filter((k) => !lib[k]);
+  }
+  function sfxUrls() {
+    const lib = (S.sfx && S.sfx.library) || {};
+    const out = {};
+    for (const [k, v] of Object.entries(lib)) if (v && v.blobId) out[k] = blobUrl(v.blobId);
+    return out;
+  }
+
   function currentVersion() {
     if (!S.versions.length) return null;
     return S.versions.find((v) => v.v === S.p.build.current) || S.versions[S.versions.length - 1];
@@ -167,7 +188,7 @@ export async function openStudio(root, projectId, app) {
     if (textsNow !== textsThen) return true;
     if (v.styleKey) {
       // Versions made before 2026-10-09 stored the key cut to 200 characters.
-      const now = styleKey(S.p.style, S.p.assets);
+      const now = styleKey(S.p.style, S.p.assets, S.p.extras);
       if (v.styleKey !== now && !(v.styleKey.length === 200 && now.startsWith(v.styleKey))) return true;
     }
     if (!tl.static && v.duration && Math.abs(v.duration - tl.duration) > 0.05) return true;
@@ -196,6 +217,11 @@ export async function openStudio(root, projectId, app) {
         if (!items.length) return p.style.look === 'collage' ? 'empty' : 'off';
         const made = items.filter((a) => a.blobId).length;
         return made === items.length ? 'done' : made ? 'stale' : 'ready';
+      }
+      case 'extras': {
+        const ex = p.extras;
+        if (!['sfx', 'ambient', 'camera', 'gsap'].some((k) => ex[k].enabled)) return 'off';
+        return ex.sfx.enabled && sfxMissing().length ? 'stale' : 'done';
       }
       case 'voice': {
         if (!p.voice.enabled || p.brief.format === 'static') return 'off';
@@ -260,7 +286,7 @@ export async function openStudio(root, projectId, app) {
 
   /* ---------- actions (used by inspector + chat) ---------- */
   const A = {
-    S, timeline, voiceDef, voiceStatus, musicStatus, musicTarget, musicPrompt, currentVersion, versionStale, contentStale, nodeStatus, bgStatus,
+    S, timeline, voiceDef, voiceStatus, musicStatus, musicTarget, musicPrompt, currentVersion, versionStale, contentStale, nodeStatus, bgStatus, sfxMissing, sfxUrls,
     changed, pushHistory,
     select(key) { S.sel = key; studio.classList.toggle('no-insp', !key); renderCanvas(); renderInsp(); },
 
@@ -418,6 +444,34 @@ export async function openStudio(root, projectId, app) {
     removeBackground(key) {
       if (S.p.style.background.images) delete S.p.style.background.images[key];
       changed({ inspector: true, preview: true });
+    },
+
+    /** Switch an extra feature on or off (sfx, ambient, camera, gsap) or change its options. */
+    setExtras(key, patch) {
+      const x = S.p.extras[key];
+      if (!x) return;
+      for (const [k, v] of Object.entries(patch || {})) {
+        if (k === 'volume') x.volume = Math.min(2, Math.max(0, Number(v) || 0));
+        else if (k === 'enabled' || k === 'auto') x[k] = Boolean(v);
+      }
+      changed({ inspector: S.sel === 'extras' && !patch._typing, preview: true });
+    },
+
+    /** Make the shared sound-effect library (paid, ElevenLabs; once for all projects). */
+    async generateSfx(names) {
+      const todo = names && names.length ? names : sfxMissing();
+      if (!todo.length) return { generated: 0 };
+      return A.busy('extras', async () => {
+        let n = 0;
+        for (const name of todo) {
+          progress('extras', `🔊 ${name} ${n + 1}/${todo.length}`);
+          const r = await api('sfx/' + name, { method: 'POST', body: {} });
+          S.sfx.library = r.library;
+          n++;
+        }
+        changed({ inspector: S.sel === 'extras', preview: true });
+        return { generated: n };
+      });
     },
 
     /** 'default' or 'collage' (Vox-style paper collage). Switching to collage brings its paper palette. */
@@ -948,6 +1002,7 @@ export async function openStudio(root, projectId, app) {
       fragment: S.comp.fragment, timeline: tl, colors: S.p.style.colors, font: fontStack(S.p.style.font), texts: S.p.edits.texts || {},
       images: bgImagesForPreview(), bgStrength: S.p.style.background.strength, voices, music,
       look: S.p.style.look, assets: assetsForPreview(), clips: cl.clips, clipBytes: cl.bytes,
+      extras: S.p.extras, sfxLib: S.p.extras.sfx.enabled ? sfxUrls() : null,
     };
   }
 
@@ -1073,6 +1128,14 @@ export async function openStudio(root, projectId, app) {
           : regen(t('assets_plan'), () => A.planAssets(), !p.script.scenes.length), openBtn];
         break;
       }
+      case 'extras': {
+        const ex = p.extras;
+        const keys = ['sfx', 'ambient', 'camera', 'gsap'];
+        body = [h('div', { class: 'ex-chips' }, keys.map((k) => h('span', { class: 'ex-chip' + (ex[k].enabled ? ' on' : '') }, t('ex_' + k)))),
+          h('div', { class: 'line' }, ex.sfx.enabled && sfxMissing().length ? t('sfx_lib_missing', { n: sfxMissing().length }) : t('ex_next_build'))];
+        foot = [ex.sfx.enabled && sfxMissing().length ? regen(t('sfx_make', { n: sfxMissing().length }), () => A.generateSfx()) : null, openBtn];
+        break;
+      }
       case 'voice': {
         const vd = voiceDef();
         const vs = voiceStatus();
@@ -1177,6 +1240,7 @@ export async function openStudio(root, projectId, app) {
     const clipKeys = Object.entries(p.style.background.images || {}).filter(([, v]) => v && v.clip).map(([k]) => k);
     if (clipKeys.length) lines.push(`Moving backgrounds (AI clips): ${clipKeys.join(', ')}`);
     lines.push(`Look: ${p.style.look === 'collage' ? 'collage (Vox-style paper collage)' : 'default'}`);
+    lines.push(`Extra features: ${['sfx', 'ambient', 'camera', 'gsap'].map((k) => `${k}=${p.extras[k].enabled ? 'on' : 'off'}`).join(', ')}${p.extras.sfx.enabled ? `; sound library ${Object.keys(S.sfx.library || {}).length}/${Object.keys(S.sfx.presets || {}).length} made` : ''}`);
     const cuts = p.assets.items;
     if (cuts.length) lines.push(`Cut-outs: ${cuts.filter((a) => a.blobId).length}/${cuts.length} made (${p.assets.style}); ${cuts.slice(0, 18).map((a) => `${a.id} ${a.sceneId} "${a.name}"${a.blobId ? '' : ' (no picture yet)'}`).join('; ')}`);
     lines.push(`Voice: ${p.voice.enabled ? `on, voice=${vd ? `${vd.id} (${vd.name})` : 'none'}, speed=${p.voice.speed}, clips ${vs.fresh}/${vs.total} up to date` : 'off'}`);
@@ -1193,8 +1257,11 @@ export async function openStudio(root, projectId, app) {
   }
 
   /* ---------- start ---------- */
+  S.sfx = { presets: {}, library: {} };
   buildNodes();
   app.setTitle(S.p.title || S.p.brief.topic, (v) => { S.p.title = v; changed({ canvas: false }); });
+  // The shared sound-effect library (for the extras step and the preview's sounds).
+  api('sfx').then((r) => { S.sfx = r; renderNode('extras'); if (S.sel === 'extras') renderInsp(); if (S.p.extras.sfx.enabled) refreshPreview(); }).catch(() => {});
   await loadVersions();
   renderCanvas();
   mountChat(chatEl, A);

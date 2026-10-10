@@ -25,7 +25,12 @@ const TOOLS = [
     look: { type: 'string', enum: ['collage', 'photo', 'illustration', '3d', 'abstract'] }, notes: str(), strength: { type: 'number' },
   }),
   fn('generate_backgrounds', 'PAID (image credits): generate the background images that are missing (or the given scene ids). Shows a confirm button.', { scene_ids: { type: 'array', items: str() } }),
-  fn('set_look', 'Overall look of the design: "collage" = Vox-style editorial paper collage (paper texture, grain, cut-out photos, torn paper, tape, highlighter, marker; also applies a paper palette), "default" = clean cards and charts. A new look needs a "Remake all" build.', { look: { type: 'string', enum: ['default', 'collage'] } }, ['look']),
+  fn('set_extras', 'Extra features for the next build (the step before the build): sfx = sound effects (whooshes, pops, ticks), ambient = background motion (never-frozen scenes), camera = camera moves and camera transitions (one continuous world), gsap = GSAP animation. Free to switch; a new build applies them.', {
+    sfx: { type: 'boolean' }, ambient: { type: 'boolean' }, camera: { type: 'boolean' }, gsap: { type: 'boolean' },
+    sfx_auto: { type: 'boolean' }, sfx_volume: { type: 'number' },
+  }),
+  fn('make_sound_effects', 'PAID (ElevenLabs credits, small, once for all projects): make the missing sounds of the shared sound-effect library. Shows a confirm button.', {}),
+  fn('set_look','Overall look of the design: "collage" = Vox-style editorial paper collage (paper texture, grain, cut-out photos, torn paper, tape, highlighter, marker; also applies a paper palette), "default" = clean cards and charts. A new look needs a "Remake all" build.', { look: { type: 'string', enum: ['default', 'collage'] } }, ['look']),
   fn('plan_cutouts', 'Suggest cut-out photos (1-3 concrete subjects per scene) for the Cut-outs step. Free. Keeps cut-outs that already have a picture.', {}),
   fn('generate_cutouts', 'PAID (image credits, ~$0.04 each): generate the cut-out pictures that are missing. Shows a confirm button.', {}),
   fn('animate_backgrounds', 'PAID (video credits, ~$0.14 per second, ~5-10 s per image): turn background images into moving AI clips. Optional scene ids (or "all" for the shared image); default = all still images. Shows a confirm button.', { keys: { type: 'array', items: str() } }),
@@ -258,6 +263,18 @@ export function mountChat(root, A) {
         const bs = A.bgStatus();
         const ids = a.scene_ids && a.scene_ids.length ? a.scene_ids : (bs.missing.length ? bs.missing : bs.keys);
         return confirmCard(t('bg_generate', { n: ids.length }), ids.join(', '), () => A.generateBackgrounds(ids));
+      }
+      case 'set_extras': {
+        for (const k of ['sfx', 'ambient', 'camera', 'gsap']) if (typeof a[k] === 'boolean') A.setExtras(k, { enabled: a[k] });
+        if (typeof a.sfx_auto === 'boolean') A.setExtras('sfx', { auto: a.sfx_auto });
+        if (a.sfx_volume != null) A.setExtras('sfx', { volume: a.sfx_volume });
+        const ex = S.p.extras;
+        return { ok: true, extras: Object.fromEntries(['sfx', 'ambient', 'camera', 'gsap'].map((k) => [k, ex[k].enabled])), sound_library_missing: A.sfxMissing() };
+      }
+      case 'make_sound_effects': {
+        const missing = A.sfxMissing();
+        if (!missing.length) return { ok: true, note: 'the sound library is complete' };
+        return confirmCard(t('sfx_make', { n: missing.length }), missing.join(', '), () => A.generateSfx());
       }
       case 'set_look': {
         A.setLook(a.look);

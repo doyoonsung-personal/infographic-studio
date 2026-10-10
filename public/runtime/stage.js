@@ -219,7 +219,7 @@
   }
 
   /* ---------- per-element animation specs ---------- */
-  var ANIM_SEL = '[data-in],[data-cue],[data-a],[data-grow],[data-count],[data-draw],[data-type],[data-loop],[data-ken],[data-out],[data-out-cue],[data-hl],[data-boil],[data-drift]';
+  var ANIM_SEL = '[data-in],[data-cue],[data-a],[data-grow],[data-count],[data-draw],[data-type],[data-loop],[data-ken],[data-out],[data-out-cue],[data-hl],[data-boil],[data-drift],[data-depth]';
 
   function timeFor(el, sc, inAttr, cueAttr, delayAttr) {
     var cue = attr(el, cueAttr);
@@ -258,9 +258,9 @@
     var draw = has(el, 'data-draw');
     var type = has(el, 'data-type');
     var hl = has(el, 'data-hl');
-    // Only data-boil / data-drift (no entrance asked for): the element is simply there and moves.
+    // Only data-boil / data-drift / data-depth (no entrance asked for): the element is simply there and moves.
     var still = !has(el, 'data-a') && !has(el, 'data-in') && !has(el, 'data-cue') && !grow && !count && !draw && !type && !hl &&
-      !has(el, 'data-ken') && !has(el, 'data-loop') && (has(el, 'data-boil') || has(el, 'data-drift'));
+      !has(el, 'data-ken') && !has(el, 'data-loop') && (has(el, 'data-boil') || has(el, 'data-drift') || has(el, 'data-depth'));
     var anc = ancestorStart(el, sc);
     // A counter inside an animated card appears with the card; on its own it fades in.
     var defA = (grow || draw || type || hl || still) ? 'none' : (count ? (anc != null ? 'none' : 'fade') : 'up');
@@ -288,7 +288,9 @@
       hl: hl, hlD: num(attr(el, 'data-hl'), 0) > 0 ? num(attr(el, 'data-hl'), 0) : 0.7,
       boil: has(el, 'data-boil') ? num(attr(el, 'data-boil'), 1.2) || 1.2 : 0,
       seed: sc.anims.length * 7919 + sc.index * 104729 + 17,
-      drift: null
+      drift: null,
+      // Layer depth for camera pushes: 1 moves with the scene, <1 lags behind (background), >1 leads (foreground).
+      depth: has(el, 'data-depth') ? num(attr(el, 'data-depth'), 1) : null
     };
     if (has(el, 'data-drift')) {
       var dv = String(attr(el, 'data-drift')).split(/[ ,]+/).map(function (x) { return num(x, 0); });
@@ -415,6 +417,10 @@
       ty += (rb() - 0.5) * 2.4 * s.boil;
     }
     if (s.hl) el.style.backgroundSize = (prog(lt, s.inT, s.hlD, 'inout') * 100).toFixed(2) + '% 46%';
+    if (s.depth != null && (curPan.x || curPan.y)) {
+      tx += (s.depth - 1) * curPan.x * 0.6;
+      ty += (s.depth - 1) * curPan.y * 0.6;
+    }
 
     el.style.opacity = op >= 0.999 ? '' : op.toFixed(4);
     el.style.translate = (tx || ty) ? tx.toFixed(2) + 'px ' + ty.toFixed(2) + 'px' : '';
@@ -440,15 +446,387 @@
     }
   }
 
-  function sceneOpacity(sc, t) {
-    var half = 0.25;
-    if (sc.transition === 'cut') {
-      var vis = t >= sc.start && (t < sc.end || sc.last);
-      return { op: vis ? 1 : 0, fin: vis ? 1 : 0, fout: 0 };
+  /* ---------- extras (owner's switches in the app) ---------- */
+  var EXTRAS = CFG.extras || {};
+  var SW = (TL && TL.width) || stage.offsetWidth || 1920;
+  var SH = (TL && TL.height) || stage.offsetHeight || 1080;
+  var curPan = { x: 0, y: 0 };
+
+  /* ---------- layout measuring (untransformed positions inside the stage) ---------- */
+  function layoutRect(el) {
+    if (el && el.offsetParent !== undefined && !(el instanceof SVGElement)) {
+      var x = 0, y = 0, n = el;
+      while (n && n !== stage) { x += n.offsetLeft || 0; y += n.offsetTop || 0; n = n.offsetParent; }
+      return { x: x, y: y, w: el.offsetWidth || 1, h: el.offsetHeight || 1 };
     }
-    var fin = sc.first ? (t >= sc.start - half ? 1 : 0) : clamp((t - (sc.start - half)) / (half * 2));
-    var fout = sc.last ? 0 : clamp((t - (sc.end - half)) / (half * 2));
-    return { op: fin * (1 - fout), fin: fin, fout: fout };
+    var r = el.getBoundingClientRect(), s = stage.getBoundingClientRect();
+    return { x: r.left - s.left, y: r.top - s.top, w: r.width || 1, h: r.height || 1 };
+  }
+  function center(r) { return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; }
+
+  /* ---------- camera inside a scene ---------- */
+  // data-cam="0: 1 960 540; c2: #chart 1.6; 5.5: 1 960 540" -> keyframes "time: zoom cx cy" (the stage
+  // point (cx, cy) is centred on screen) or "time: #selector zoom" (centre on that element). Times are
+  // scene seconds or cues (c2, c2+0.3). Between keys the camera eases in and out.
+  function cueTime(sc, v) {
+    var m = /^c(\d+)\s*([+-]\s*[\d.]+)?$/.exec(String(v).trim());
+    if (m) {
+      var base = sc.cues[m[1]] != null ? sc.cues[m[1]] : clamp(num(m[1], 1) * 0.12, 0, 0.9) * sc.len;
+      return base + (m[2] ? parseFloat(m[2].replace(/\s+/g, '')) : 0);
+    }
+    return num(v, 0) * sc.scale;
+  }
+  function parseCam(sc) {
+    var src = attr(sc.el, 'data-cam');
+    if (!src) return null;
+    var keys = [];
+    src.split(';').forEach(function (part) {
+      var i = part.indexOf(':');
+      if (i < 0) return;
+      var t = cueTime(sc, part.slice(0, i));
+      var v = part.slice(i + 1).trim().split(/\s+/);
+      if (/^[#.\[]/.test(v[0] || '')) keys.push({ t: t, sel: v[0], z: num(v[1], 1.6) });
+      else keys.push({ t: t, z: num(v[0], 1), cx: num(v[1], SW / 2), cy: num(v[2], SH / 2) });
+    });
+    keys.sort(function (a, b) { return a.t - b.t; });
+    return keys.length ? keys : null;
+  }
+  function measureCam(sc) {
+    if (!sc.cam) return;
+    sc.cam.forEach(function (k) {
+      if (!k.sel) return;
+      var el = null;
+      try { el = sc.el.querySelector(k.sel); } catch (e) { report('data-cam: bad selector ' + k.sel); }
+      if (!el) { k.cx = SW / 2; k.cy = SH / 2; return; }
+      var c = center(layoutRect(el));
+      k.cx = c.x; k.cy = c.y;
+    });
+  }
+  function camAt(sc, lt) {
+    var ks = sc.cam;
+    if (ks) {
+      if (lt <= ks[0].t) return ks[0];
+      for (var i = 0; i < ks.length - 1; i++) {
+        var a = ks[i], b = ks[i + 1];
+        if (lt <= b.t) {
+          var p = EASE.inout(clamp((lt - a.t) / Math.max(0.001, b.t - a.t)));
+          return { z: lerp(a.z, b.z, p), cx: lerp(a.cx, b.cx, p), cy: lerp(a.cy, b.cy, p) };
+        }
+      }
+      return ks[ks.length - 1];
+    }
+    if (EXTRAS.ambient && EXTRAS.ambient.enabled && !STATIC) {
+      // Background motion on: the camera breathes, a slow push with a little sideways drift.
+      var q = clamp(lt / Math.max(0.1, sc.len));
+      return { z: 1 + 0.035 * q, cx: SW / 2 + (sc.index % 2 ? -1 : 1) * 16 * q, cy: SH / 2 };
+    }
+    return null;
+  }
+  function camTransform(c) {
+    if (!c || (Math.abs(c.z - 1) < 1e-4 && Math.abs(c.cx - SW / 2) < 0.01 && Math.abs(c.cy - SH / 2) < 0.01)) return '';
+    return 'translate(' + (c.z * (SW / 2 - c.cx)).toFixed(2) + 'px,' + (c.z * (SH / 2 - c.cy)).toFixed(2) + 'px) scale(' + c.z.toFixed(4) + ')';
+  }
+  /** Where a stage point appears on screen under a scene's camera. */
+  function camPoint(c, p) {
+    if (!c) return p;
+    return { x: SW / 2 + c.z * (p.x - c.cx), y: SH / 2 + c.z * (p.y - c.cy) };
+  }
+
+  /* ---------- transitions between scenes ---------- */
+  // fade (default), cut, slide, zoom: each scene uses its own. Camera transitions (push, push-up,
+  // zoom-in, zoom-out, whip, circle, morph): set on the ENTERING scene; the outgoing scene moves with it.
+  var CAM_TYPES = { push: 1, 'push-up': 1, 'zoom-in': 1, 'zoom-out': 1, whip: 1, circle: 1, morph: 1 };
+  function halfOf(type) { return type === 'whip' ? 0.2 : CAM_TYPES[type] ? 0.4 : 0.25; }
+  scenes.forEach(function (sc, i) {
+    sc.prev = scenes[i - 1] || null;
+    sc.next = scenes[i + 1] || null;
+    sc.exitType = sc.next && CAM_TYPES[sc.next.transition] ? sc.next.transition : sc.transition;
+    sc.cam = STATIC ? null : parseCam(sc);
+    sc.focusSel = attr(sc.el, 'data-focus');
+  });
+  // The point a zoom-in / circle transition grows from: the outgoing scene's data-focus element.
+  function measureFocus(sc) {
+    sc.focus = { x: SW / 2, y: SH / 2 };
+    if (!sc.focusSel) return;
+    var el = null;
+    try { el = sc.el.querySelector(sc.focusSel); } catch (e) { report('data-focus: bad selector ' + sc.focusSel); }
+    if (el) sc.focus = center(layoutRect(el));
+  }
+
+  // Shared elements: [data-share="key"] in a scene entered with "morph" glides from where the element
+  // with the same key sat in the previous scene.
+  var morphs = [];
+  scenes.forEach(function (sc) {
+    if (sc.transition !== 'morph' || !sc.prev) return;
+    Array.prototype.forEach.call(sc.el.querySelectorAll('[data-share]'), function (b) {
+      var a = sc.prev.el.querySelector('[data-share="' + attr(b, 'data-share') + '"]');
+      if (a) morphs.push({ sc: sc, a: a, b: b, ra: null, rb: null, active: false });
+      // The arriving copy is the one that glides in, so it has no entrance of its own.
+      var sb = specOf.get(b);
+      if (sb) { sb.a = 'none'; sb.showAlways = true; }
+    });
+  });
+  function measureMorphs() {
+    morphs.forEach(function (m) { m.ra = layoutRect(m.a); m.rb = layoutRect(m.b); });
+  }
+
+  function sceneState(sc, T) {
+    var st = { op: 1, tx: 0, ty: 0, s: 1, blur: 0, clip: '', panX: 0, panY: 0, fin: 1, fout: 0, hidden: false };
+    if (STATIC) return st;
+    var lt = T - sc.start;
+    var cam = camAt(sc, lt);
+    // Entering.
+    if (!sc.first) {
+      var hIn = halfOf(sc.transition);
+      if (sc.transition === 'cut') { if (T < sc.start) st.hidden = true; }
+      else {
+        var fin = clamp((T - (sc.start - hIn)) / (hIn * 2));
+        if (fin <= 0) st.hidden = true;
+        st.fin = fin;
+        var e = EASE.inout(fin);
+        var F = sc.prev ? camPoint(camAt(sc.prev, T - sc.prev.start), sc.prev.focus || { x: SW / 2, y: SH / 2 }) : { x: SW / 2, y: SH / 2 };
+        switch (sc.transition) {
+          case 'slide': st.tx += (1 - e) * SW; break;
+          case 'zoom': st.op *= fin; st.s *= lerp(1.06, 1, EASE.out(fin)); break;
+          case 'push': st.tx += (1 - e) * SW; st.panX = (1 - e) * SW; break;
+          case 'push-up': st.ty += (1 - e) * SH; st.panY = (1 - e) * SH; break;
+          case 'zoom-in': {
+            var s1 = lerp(0.3, 1, e);
+            st.s *= s1; st.tx += (1 - s1) * (F.x - SW / 2); st.ty += (1 - s1) * (F.y - SH / 2);
+            st.op *= clamp((fin - 0.15) / 0.5);
+            break;
+          }
+          case 'zoom-out': st.s *= lerp(1.8, 1, e); st.op *= clamp(fin / 0.6); break;
+          case 'whip': st.tx += (1 - e) * SW * 1.1; st.blur = Math.sin(Math.PI * fin) * 22; break;
+          case 'circle': {
+            var r = e * Math.hypot(SW, SH);
+            st.clip = fin >= 1 ? '' : 'circle(' + r.toFixed(1) + 'px at ' + F.x.toFixed(1) + 'px ' + F.y.toFixed(1) + 'px)';
+            break;
+          }
+          case 'morph': st.op *= clamp(fin / 0.35); break;
+          default: st.op *= fin;   // fade
+        }
+      }
+    }
+    // Leaving.
+    if (!sc.last) {
+      var hOut = halfOf(sc.exitType);
+      if (sc.exitType === 'cut') { if (T >= sc.end) st.hidden = true; }
+      else {
+        var fout = clamp((T - (sc.end - hOut)) / (hOut * 2));
+        st.fout = fout;
+        var e2 = EASE.inout(fout);
+        switch (sc.exitType) {
+          case 'slide': st.tx -= e2 * SW; break;
+          case 'zoom': st.op *= 1 - fout; st.s *= lerp(1, 0.97, fout); break;
+          case 'push': st.tx -= e2 * SW; st.panX = -e2 * SW; break;
+          case 'push-up': st.ty -= e2 * SH; st.panY = -e2 * SH; break;
+          case 'zoom-in': {
+            var F2 = camPoint(cam, sc.focus || { x: SW / 2, y: SH / 2 });
+            var s2 = lerp(1, 4, EASE.in(fout));
+            st.s *= s2; st.tx += (1 - s2) * (F2.x - SW / 2); st.ty += (1 - s2) * (F2.y - SH / 2);
+            st.op *= 1 - clamp((fout - 0.45) / 0.45);
+            break;
+          }
+          case 'zoom-out': st.s *= lerp(1, 0.55, e2); st.op *= 1 - clamp(fout / 0.7); break;
+          case 'whip': st.tx -= e2 * SW * 1.1; st.blur = Math.max(st.blur, Math.sin(Math.PI * fout) * 22); break;
+          case 'circle': break;   // stays until the next scene has covered it
+          case 'morph': st.op *= 1 - clamp(fout / 0.8); break;
+          default: st.op *= 1 - fout;
+        }
+        if (fout >= 1) st.hidden = true;
+      }
+    }
+    st.cam = cam;
+    return st;
+  }
+
+  /* ---------- ambient backgrounds: <div data-ambient="particles|glow|grid|waves|gradient"> ---------- */
+  // Generated and moved by the stage (on the global clock, so the same preset flows on across scenes).
+  var ambients = [];
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  Array.prototype.forEach.call(stage.querySelectorAll('[data-ambient]'), function (box, idx) {
+    var kind = attr(box, 'data-ambient');
+    var R = rand(4099 + idx * 7919);
+    var a = { box: box, kind: kind, spd: num(attr(box, 'data-speed'), 1), items: [] };
+    var colors = ['var(--accent)', 'var(--accent2)', 'var(--accent3)', 'var(--muted)'];
+    if (kind === 'particles') {
+      var n = Math.min(160, num(attr(box, 'data-n'), 46));
+      for (var i = 0; i < n; i++) {
+        var d = document.createElement('i');
+        var size = 2 + R() * 6, depth = 0.35 + R() * 0.9;
+        d.style.cssText = 'position:absolute;left:0;top:0;border-radius:50%;width:' + size.toFixed(1) + 'px;height:' + size.toFixed(1) + 'px;background:' +
+          colors[Math.floor(R() * 4)] + ';opacity:' + (0.12 + R() * 0.4).toFixed(2);
+        box.appendChild(d);
+        a.items.push({ el: d, x: R() * SW, y: R() * SH, depth: depth, ph: R() * 6.28 });
+      }
+    } else if (kind === 'glow') {
+      var ng = Math.min(6, num(attr(box, 'data-n'), 3));
+      for (var g = 0; g < ng; g++) {
+        var b = document.createElement('i');
+        var w = SW * (0.45 + R() * 0.3);
+        b.style.cssText = 'position:absolute;left:0;top:0;border-radius:50%;width:' + w.toFixed(0) + 'px;height:' + w.toFixed(0) + 'px;' +
+          'background:radial-gradient(circle,color-mix(in srgb,' + colors[g % 3] + ' 42%,transparent) 0%,transparent 68%)';
+        box.appendChild(b);
+        a.items.push({ el: b, w: w, fx: 0.05 + R() * 0.07, fy: 0.04 + R() * 0.06, ph: R() * 6.28 });
+      }
+    } else if (kind === 'grid') {
+      var cell = num(attr(box, 'data-cell'), 80);
+      var gr = document.createElement('i');
+      gr.style.cssText = 'position:absolute;inset:-' + cell + 'px;background-image:linear-gradient(color-mix(in srgb,var(--muted) 22%,transparent) 1px,transparent 1px),' +
+        'linear-gradient(90deg,color-mix(in srgb,var(--muted) 22%,transparent) 1px,transparent 1px);background-size:' + cell + 'px ' + cell + 'px' +
+        (has(box, 'data-tilt') ? ';transform:perspective(900px) rotateX(58deg) scale(2.2);transform-origin:50% 100%' : '');
+      box.appendChild(gr);
+      a.items.push({ el: gr, cell: cell });
+    } else if (kind === 'waves') {
+      var svg = document.createElementNS(SVGNS, 'svg');
+      svg.setAttribute('width', SW); svg.setAttribute('height', SH);
+      svg.style.cssText = 'position:absolute;inset:0';
+      var nw = Math.min(6, num(attr(box, 'data-n'), 3));
+      for (var k = 0; k < nw; k++) {
+        var p = document.createElementNS(SVGNS, 'path');
+        p.setAttribute('fill', 'none');
+        p.setAttribute('stroke', colors[k % 3]);
+        p.setAttribute('stroke-width', String(2 + k));
+        p.setAttribute('opacity', (0.18 + 0.08 * k).toFixed(2));
+        svg.appendChild(p);
+        a.items.push({ el: p, y: SH * (0.55 + 0.1 * k), amp: 22 + R() * 30, len: 0.0035 + R() * 0.003, ph: R() * 6.28, sp: 0.5 + R() * 0.5 });
+      }
+      box.appendChild(svg);
+    } else if (kind !== 'gradient') {
+      report('data-ambient: unknown kind "' + kind + '" (particles, glow, grid, waves, gradient)');
+      return;
+    }
+    ambients.push(a);
+  });
+  function updateAmbient(T) {
+    for (var i = 0; i < ambients.length; i++) {
+      var a = ambients[i], s = a.spd, it, j;
+      if (a.kind === 'particles') {
+        for (j = 0; j < a.items.length; j++) {
+          it = a.items[j];
+          var y = ((it.y - T * 26 * s * it.depth) % (SH + 20) + SH + 20) % (SH + 20) - 10;
+          var x = it.x + Math.sin(T * 0.6 * s + it.ph) * 14 * it.depth;
+          it.el.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
+        }
+      } else if (a.kind === 'glow') {
+        for (j = 0; j < a.items.length; j++) {
+          it = a.items[j];
+          var gx = SW * (0.5 + 0.38 * Math.sin(T * it.fx * s * 6.28 + it.ph)) - it.w / 2;
+          var gy = SH * (0.5 + 0.34 * Math.cos(T * it.fy * s * 6.28 + it.ph * 1.7)) - it.w / 2;
+          it.el.style.transform = 'translate(' + gx.toFixed(1) + 'px,' + gy.toFixed(1) + 'px)';
+        }
+      } else if (a.kind === 'grid') {
+        it = a.items[0];
+        var off = (T * 18 * s) % it.cell;
+        it.el.style.backgroundPosition = off.toFixed(2) + 'px ' + off.toFixed(2) + 'px';
+      } else if (a.kind === 'waves') {
+        for (j = 0; j < a.items.length; j++) {
+          it = a.items[j];
+          var d = 'M0 ' + it.y.toFixed(1);
+          for (var x2 = 0; x2 <= SW; x2 += 32) {
+            d += ' L' + x2 + ' ' + (it.y + Math.sin(x2 * it.len * 6.28 + T * it.sp * s * 2 + it.ph) * it.amp).toFixed(1);
+          }
+          it.el.setAttribute('d', d);
+        }
+      } else if (a.kind === 'gradient') {
+        var ang = 120 + T * 9 * s;
+        a.box.style.background = 'linear-gradient(' + ang.toFixed(2) + 'deg,var(--bg) 0%,color-mix(in srgb,var(--accent) 16%,var(--bg)) 45%,' +
+          'color-mix(in srgb,var(--accent3) 14%,var(--bg)) 70%,var(--bg) 100%)';
+      }
+    }
+  }
+
+  /* ---------- GSAP timelines (optional): window.STAGE_TIMELINES = {sceneId: function (tl, ctx) {...}} ---------- */
+  // Each builder fills a paused timeline whose time 0 is the scene start; seek(t) moves the playhead,
+  // so frames stay exact. Rebuilt after fonts load (SplitText measures lines) and after text edits.
+  var gsapCtx = null;
+  function buildGsap() {
+    var G = window.gsap, B = window.STAGE_TIMELINES;
+    if (!B) return;
+    if (!G) { report('STAGE_TIMELINES needs GSAP, which is not loaded'); return; }
+    ['CustomEase', 'SplitText', 'DrawSVGPlugin', 'MorphSVGPlugin', 'MotionPathPlugin'].forEach(function (n) {
+      if (window[n]) { try { G.registerPlugin(window[n]); } catch (e) { /* already registered */ } }
+    });
+    G.ticker.lagSmoothing(0);
+    if (gsapCtx) gsapCtx.revert();
+    scenes.forEach(function (sc) { sc.tl = null; });
+    gsapCtx = G.context(function () {
+      scenes.forEach(function (sc) {
+        var fn = B[sc.id];
+        if (typeof fn !== 'function') return;
+        var tl = G.timeline({ paused: true });
+        try {
+          fn(tl, { el: sc.el, q: G.utils.selector(sc.el), cue: function (n) { return sc.cues[n] != null ? sc.cues[n] : null; }, len: sc.len, W: SW, H: SH, rand: rand });
+        } catch (e) { report(e); }
+        sc.tl = tl;
+      });
+    }, stage);
+  }
+
+  /* ---------- sound effects: where they fall (the player and the renderer mix them) ---------- */
+  var SFX_GAIN = { whoosh: 0.55, swoosh: 0.45, pop: 0.5, click: 0.4, tick: 0.35, ding: 0.5, riser: 0.45, paper: 0.6, marker: 0.4, type: 0.35 };
+  function sfxEvents() {
+    var cfg = EXTRAS.sfx || {};
+    if (!cfg.enabled || STATIC) return [];
+    var auto = cfg.auto !== false;
+    var collage = stage.getAttribute('data-look') === 'collage';
+    var ev = [];
+    scenes.forEach(function (sc) {
+      var own = attr(sc.el, 'data-sfx');
+      if (own && own !== 'none') ev.push({ t: sc.start + (has(sc.el, 'data-sfx-at') ? cueTime(sc, attr(sc.el, 'data-sfx-at')) : 0), name: own });
+      if (auto && !sc.first && sc.transition !== 'cut' && own !== 'none') {
+        var tn = sc.transition === 'circle' || sc.transition === 'morph' || sc.transition === 'fade' ? 'swoosh' : 'whoosh';
+        ev.push({ t: Math.max(0, sc.start - halfOf(sc.transition) * 0.7), name: tn, auto: true });
+      }
+      // Elements with their own data-sfx (timed by their entrance, or data-sfx-at), then automatic ones.
+      Array.prototype.forEach.call(sc.el.querySelectorAll('[data-sfx]'), function (el) {
+        var name = attr(el, 'data-sfx');
+        if (!name || name === 'none') return;
+        var spec = specOf.get(el);
+        var at = has(el, 'data-sfx-at') ? cueTime(sc, attr(el, 'data-sfx-at')) : spec ? spec.inT : 0;
+        ev.push({ t: sc.start + at, name: name });
+      });
+      if (!auto) return;
+      var n = 0;
+      sc.anims.slice().sort(function (a, b) { return a.inT - b.inT; }).forEach(function (s) {
+        if (n >= 4 || has(s.el, 'data-sfx')) return;
+        var name = s.a === 'pop' ? (collage ? 'paper' : 'pop') : s.count ? 'tick'
+          : s.draw && s.el.classList && s.el.classList.contains('c-marker') ? 'marker' : s.hl ? 'marker' : null;
+        if (!name) return;
+        ev.push({ t: sc.start + s.inT, name: name, auto: true });
+        n++;
+      });
+    });
+    ev.sort(function (a, b) { return a.t - b.t; });
+    var out = [], last = -9, vol = num(cfg.volume, 1);
+    ev.forEach(function (e) {
+      if (e.t < 0 || e.t > DURATION) return;
+      if (e.auto && e.t - last < 0.2) return;   // automatic sounds never pile up
+      out.push({ t: +e.t.toFixed(3), name: e.name, gain: +((SFX_GAIN[e.name] || 0.45) * vol).toFixed(3) });
+      last = e.t;
+    });
+    return out;
+  }
+
+  /** Fingerprint of what the composition shows now (for the "nothing moves" check). */
+  function stageSignature() {
+    var s = '';
+    for (var i = 0; i < scenes.length; i++) {
+      var sc = scenes[i];
+      if (sc.el.style.visibility === 'hidden') continue;
+      var html = sc.el.innerHTML, h = 2166136261;
+      for (var j = 0; j < html.length; j++) { h ^= html.charCodeAt(j); h = Math.imul(h, 16777619); }
+      // The automatic camera breathing doesn't count; camera moves the composition asked for do.
+      s += sc.id + ':' + (h >>> 0).toString(36) + ':' + sc.el.style.translate + sc.el.style.scale + sc.el.style.opacity + sc.el.style.clipPath +
+        (sc.cam ? sc.el.style.transform : '') + ';';
+    }
+    return s;
+  }
+
+  function measureAll() {
+    scenes.forEach(function (sc) { measureCam(sc); measureFocus(sc); });
+    measureMorphs();
   }
 
   var hooks = window.STAGE_HOOKS || {};
@@ -461,28 +839,48 @@
     var T = STATIC ? 1e6 : clamp(t, 0, Math.max(0, DURATION));
     for (var i = 0; i < scenes.length; i++) {
       var sc = scenes[i];
-      var o = STATIC ? { op: 1, fin: 1, fout: 0 } : sceneOpacity(sc, T);
+      var o = sceneState(sc, T);
       var el = sc.el;
-      el.style.visibility = o.op > 0.0005 ? 'visible' : 'hidden';
+      var visible = !o.hidden && o.op > 0.0005;
+      el.style.visibility = visible ? 'visible' : 'hidden';
       el.style.opacity = o.op >= 0.999 ? '' : o.op.toFixed(4);
-      var tr = '', scl = '';
-      if (!STATIC && sc.transition === 'slide') {
-        var off = o.fin < 1 ? (1 - EASE.inout(o.fin)) * 100 : -EASE.inout(o.fout) * 100;
-        tr = off ? off.toFixed(3) + '% 0' : '';
-        el.style.opacity = '';
-      } else if (!STATIC && sc.transition === 'zoom') {
-        var z = o.fin < 1 ? lerp(1.06, 1, EASE.out(o.fin)) : lerp(1, 0.97, o.fout);
-        scl = z !== 1 ? z.toFixed(4) : '';
-      }
-      el.style.translate = tr;
-      el.style.scale = scl;
-      if (o.op <= 0.0005 && !STATIC) continue;
+      el.style.translate = (o.tx || o.ty) ? o.tx.toFixed(2) + 'px ' + o.ty.toFixed(2) + 'px' : '';
+      el.style.scale = Math.abs(o.s - 1) > 1e-4 ? o.s.toFixed(4) : '';
+      el.style.filter = o.blur > 0.05 ? 'blur(' + o.blur.toFixed(2) + 'px)' : '';
+      el.style.clipPath = o.clip;
+      // Scenes are transparent; a circle reveal must cover the scene underneath, so it borrows the
+      // stage's own background (colour and paper texture, which line up exactly).
+      el.style.background = o.clip ? 'inherit' : '';
+      el.style.transform = STATIC ? '' : camTransform(o.cam);
+      if (!visible && !STATIC) continue;
       var lt = STATIC ? 1e6 : T - sc.start;
+      curPan.x = o.panX; curPan.y = o.panY;
       for (var j = 0; j < sc.anims.length; j++) applySpec(sc.anims[j], lt, sc.len);
+      curPan.x = 0; curPan.y = 0;
       for (var k = 0; k < sc.progress.length; k++) sc.progress[k].style.width = (clamp(lt / sc.len) * 100).toFixed(3) + '%';
+      if (sc.tl) sc.tl.seek(STATIC ? sc.tl.duration() : clamp(lt, 0, Math.max(sc.len, sc.tl.duration())), false);
       var h = hooks[sc.id];
       if (typeof h === 'function') {
         try { h(ctxFor(sc, lt, T)); } catch (e) { report(e); }
+      }
+    }
+    // Shared elements gliding between scenes ("morph").
+    for (var m = 0; m < morphs.length; m++) {
+      var mp = morphs[m], B = mp.sc;
+      var fin = STATIC ? 1 : clamp((T - (B.start - halfOf('morph'))) / (halfOf('morph') * 2));
+      var during = fin > 0 && fin < 1;
+      // The arriving copy sits exactly on the original while its scene fades in (the first 35%), then
+      // the original hides and the copy glides to its own place.
+      mp.a.style.visibility = during && fin > 0.35 ? 'hidden' : '';
+      if (during && mp.ra && mp.rb) {
+        var e = EASE.inout(clamp((fin - 0.35) / 0.65)), ca = center(mp.ra), cb = center(mp.rb);
+        mp.b.style.translate = ((ca.x - cb.x) * (1 - e)).toFixed(2) + 'px ' + ((ca.y - cb.y) * (1 - e)).toFixed(2) + 'px';
+        mp.b.style.scale = lerp(mp.ra.w / mp.rb.w, 1, e).toFixed(4) + ' ' + lerp(mp.ra.h / mp.rb.h, 1, e).toFixed(4);
+        mp.b.style.opacity = '';
+        mp.active = true;
+      } else if (mp.active) {
+        mp.active = false;
+        if (!specOf.get(mp.b)) { mp.b.style.translate = ''; mp.b.style.scale = ''; }
       }
     }
     for (var g = 0; g < globalProgress.length; g++) {
@@ -494,6 +892,7 @@
       root.style.setProperty('--grain-x', ((gs * 97) % 300) + 'px');
       root.style.setProperty('--grain-y', ((gs * 173) % 300) + 'px');
     }
+    if (ambients.length) updateAmbient(STATIC ? 0 : T);
     updateClips(T);
     if (typeof hooks['*'] === 'function') {
       try { hooks['*'](ctxFor(null, T, T)); } catch (e) { report(e); }
@@ -521,6 +920,8 @@
   function stageApply(patch) {
     patch = patch || {};
     if (patch.texts) {
+      // GSAP may have split the old text into spans: undo that first, then bind the new text.
+      if (gsapCtx) { gsapCtx.revert(); gsapCtx = null; }
       texts = Object.assign({}, defaults, patch.texts);
       bindTexts();
       // Typewriter specs need the newly bound text before we redraw.
@@ -531,11 +932,21 @@
       });
     }
     if (patch.colors || patch.font) applyColors(patch.colors, patch.font);
+    if (patch.texts) {
+      measureAll();
+      buildGsap();
+    }
     seek(lastT);
   }
 
+  measureAll();
+  buildGsap();
+
   var ready = (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve())
     .then(function () {
+      // Fonts change text sizes: measure again and let SplitText split the final lines.
+      measureAll();
+      buildGsap();
       var imgs = Array.prototype.slice.call(stage.querySelectorAll('img'));
       return Promise.all(imgs.map(function (im) { return im.decode ? im.decode().catch(function () {}) : null; }));
     })
@@ -544,13 +955,15 @@
   window.DURATION = DURATION;
   window.seek = seek;
   window.stageSettle = stageSettle;
+  window.stageSignature = stageSignature;
   window.STAGE_READY = ready;
   window.stageApply = stageApply;
   window.stageInfo = function () {
     return {
       duration: DURATION, static: STATIC, errors: errors.slice(),
       textDefaults: defaults,
-      scenes: scenes.map(function (s) { return { id: s.id, start: s.start, end: s.end, len: s.len, anims: s.anims.length }; })
+      sfx: sfxEvents(),
+      scenes: scenes.map(function (s) { return { id: s.id, start: s.start, end: s.end, len: s.len, anims: s.anims.length, transition: s.transition, gsap: !!s.tl }; })
     };
   };
 

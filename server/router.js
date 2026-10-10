@@ -77,6 +77,23 @@ export async function handle(context) {
     if (path === 'video' && method === 'POST') return json(await video.start(env, await readJson(request), await loadConfig(env)));
     if (parts[0] === 'video' && parts.length === 2 && method === 'GET') return json(await video.poll(env, parts[1]));
     if (path === 'eleven/voices' && method === 'GET') return json(await eleven.voices(env));
+    if (path === 'sfx' && method === 'GET') {
+      return json({ presets: eleven.SFX_PRESETS, library: (await getJSON(env, 'sfxlib')) || {} });
+    }
+    if (parts[0] === 'sfx' && parts.length === 2 && method === 'POST') {
+      // Make (or remake) one sound of the shared library: a preset name, or a custom name with a prompt.
+      const name = parts[1];
+      if (!/^[a-z][a-z0-9-]{1,23}$/.test(name)) fail(400, 'bad sound name');
+      const body = await readJson(request);
+      const preset = eleven.SFX_PRESETS[name];
+      const prompt = body.prompt || (preset && preset.prompt);
+      if (!prompt) fail(400, 'prompt required for a custom sound');
+      const made = await eleven.soundEffect(env, prompt, body.duration || (preset && preset.duration));
+      const lib = (await getJSON(env, 'sfxlib')) || {};
+      lib[name] = { ...made, prompt: String(prompt).slice(0, 450), at: Date.now() };
+      await putJSON(env, 'sfxlib', lib);
+      return json({ library: lib });
+    }
     if (path === 'palette-from-url' && method === 'POST') return json(await colorsFromUrl(await readJson(request)));
 
     if (parts[0] === 'jobs') {

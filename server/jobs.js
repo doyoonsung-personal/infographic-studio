@@ -224,9 +224,12 @@ export async function workerBundle(env, job) {
   if (base && base.jobId) {
     const bs = await getJSON(env, 'jobsnap:' + base.jobId);
     const bp = bs && bs.project;
-    if (bp) baseProject = { brief: bp.brief, facts: bp.facts, script: bp.script, look: (bp.style && bp.style.look) || 'default', assets: bp.assets || null };
+    if (bp) baseProject = { brief: bp.brief, facts: bp.facts, script: bp.script, look: (bp.style && bp.style.look) || 'default', assets: bp.assets || null, extras: bp.extras || null };
   }
-  return { job: publicJob(job), project: snap.project, baseComposition: composition, baseVersion: base, baseProject };
+  // The shared sound-effect library, when the project has sound effects on.
+  const ex = snap.project && snap.project.extras;
+  const sfxLibrary = ex && ex.sfx && ex.sfx.enabled ? (await getJSON(env, 'sfxlib')) || {} : null;
+  return { job: publicJob(job), project: snap.project, baseComposition: composition, baseVersion: base, baseProject, sfxLibrary };
 }
 
 // Each KV write counts toward the free plan's 1,000 a day, so progress lines within the same stage are

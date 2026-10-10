@@ -1,11 +1,13 @@
-// Mixes narration clips (placed at their scene times) with the music bed, ducking the music
-// under the voice. Returns the path of the mixed .m4a, or null when there is no audio at all.
+// Mixes narration clips (placed at their scene times) with the music bed, ducking the music under the
+// voice, plus sound effects at their event times. Returns the path of the mixed .m4a, or null when
+// there is no audio at all.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { ffmpeg } from './tools.mjs';
 
-export async function mixAudio({ dir, timeline: tl, project }) {
+/** sfx: [{t, name, gain, file}] from the stage (transitions, pops, counters, data-sfx). */
+export async function mixAudio({ dir, timeline: tl, project, sfx = [] }) {
   const D = tl.duration;
   const inputs = [];
   const voices = [];
@@ -21,6 +23,15 @@ export async function mixAudio({ dir, timeline: tl, project }) {
   const hasMusic = m.enabled && fs.existsSync(musicFile);
   let musicIdx = -1;
   if (hasMusic) { musicIdx = inputs.length; inputs.push(musicFile); }
+  // One input per sound file, split into one copy per use.
+  const byFile = new Map();
+  for (const e of sfx) {
+    if (!e.file || !fs.existsSync(e.file) || !(e.t >= 0) || e.t >= D) continue;
+    if (!byFile.has(e.file)) byFile.set(e.file, []);
+    byFile.get(e.file).push(e);
+  }
+  const sfxInputs = [];
+  for (const [file, evs] of byFile) { sfxInputs.push({ idx: inputs.length, evs }); inputs.push(file); }
   if (!inputs.length) return null;
 
   const f = [];
@@ -33,6 +44,8 @@ export async function mixAudio({ dir, timeline: tl, project }) {
   if (voices.length > 1) f.push(`${voices.map((_, i) => `[v${i}]`).join('')}amix=inputs=${voices.length}:normalize=0:dropout_transition=0[nar]`);
   else if (voices.length === 1) f.push('[v0]anull[nar]');
 
+  // The bed: narration and/or music (music ducked under the voice).
+  let bed = null;
   if (hasMusic) {
     const vol = Math.min(1, Math.max(0, Number(m.volume ?? 0.22)));
     const fadeOut = Math.max(0, D - 2.2);
@@ -42,13 +55,32 @@ export async function mixAudio({ dir, timeline: tl, project }) {
       f.push('[nar]asplit=2[narA][narSC0]');
       f.push('[narSC0]apad[narSC]');
       f.push('[mus][narSC]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=400[duck]');
-      f.push('[narA][duck]amix=inputs=2:normalize=0:dropout_transition=0,alimiter=limit=0.95,apad[out]');
+      f.push('[narA][duck]amix=inputs=2:normalize=0:dropout_transition=0[bed]');
     } else {
-      f.push('[mus]alimiter=limit=0.95,apad[out]');
+      f.push('[mus]anull[bed]');
     }
-  } else {
-    f.push('[nar]alimiter=limit=0.95,apad[out]');
+    bed = '[bed]';
+  } else if (voices.length) {
+    bed = '[nar]';
   }
+
+  // Sound effects, each delayed to its moment at its own gain.
+  const fx = [];
+  sfxInputs.forEach((s, i) => {
+    const n = s.evs.length;
+    const outs = s.evs.map((_, k) => `[x${i}_${k}]`).join('');
+    f.push(`[${s.idx}:a]aresample=44100,aformat=channel_layouts=stereo${n > 1 ? `,asplit=${n}${outs}` : outs}`);
+    s.evs.forEach((e, k) => {
+      f.push(`[x${i}_${k}]volume=${Number(e.gain || 0.5).toFixed(3)},adelay=delays=${Math.max(0, Math.round(e.t * 1000))}:all=1[e${i}_${k}]`);
+      fx.push(`[e${i}_${k}]`);
+    });
+  });
+  let sfxOut = null;
+  if (fx.length > 1) { f.push(`${fx.join('')}amix=inputs=${fx.length}:normalize=0:dropout_transition=0[sfx]`); sfxOut = '[sfx]'; }
+  else if (fx.length === 1) sfxOut = fx[0];
+
+  if (bed && sfxOut) f.push(`${bed}${sfxOut}amix=inputs=2:normalize=0:dropout_transition=0,alimiter=limit=0.95,apad[out]`);
+  else f.push(`${bed || sfxOut}alimiter=limit=0.95,apad[out]`);
 
   const out = path.join(dir, 'out', 'mix.m4a');
   const args = [];

@@ -260,6 +260,45 @@ const RENDER = {
     body.append(h('div', { class: 'hint' }, t('assets_footer')));
   },
 
+  extras(body, A) {
+    const S = A.S;
+    const ex = S.p.extras;
+    body.append(h('div', { class: 'hint' }, t('ex_hint')));
+    const card = (key, more) => {
+      const on = ex[key].enabled;
+      return h('div', { class: 'card ex-card' + (on ? ' on' : '') },
+        h('label', { class: 'check' },
+          h('span', { class: 'switch' }, h('input', { type: 'checkbox', checked: on, onchange: (e) => A.setExtras(key, { enabled: e.target.checked }) }), h('span')),
+          h('b', {}, t('ex_' + key)), h('span', { class: 'tag' }, t('ex_' + key + '_cost'))),
+        h('div', { class: 'hint' }, t('ex_' + key + '_hint')),
+        on && more ? more() : null);
+    };
+    body.append(card('sfx', () => {
+      const lib = (S.sfx && S.sfx.library) || {};
+      const presets = (S.sfx && S.sfx.presets) || {};
+      const missing = A.sfxMissing();
+      const secs = missing.reduce((a, k) => a + ((presets[k] && presets[k].duration) || 1), 0);
+      const vol = h('span', { class: 'tag' }, Math.round((ex.sfx.volume ?? 1) * 100) + '%');
+      const box = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+        h('label', { class: 'check' }, h('span', { class: 'switch' }, h('input', { type: 'checkbox', checked: ex.sfx.auto !== false, onchange: (e) => A.setExtras('sfx', { auto: e.target.checked }) }), h('span')), t('sfx_auto')),
+        field(t('sfx_volume'), h('div', { class: 'row' },
+          h('input', { type: 'range', min: 0, max: 2, step: 0.05, value: ex.sfx.volume ?? 1, class: 'grow', oninput: (e) => { vol.textContent = Math.round(e.target.value * 100) + '%'; }, onchange: (e) => A.setExtras('sfx', { volume: e.target.value }) }), vol)),
+        h('div', { class: 'sec' }, t('sfx_library')),
+        missing.length ? h('div', { class: 'row wrap' },
+          busyBtn(A, 'extras', t('sfx_make', { n: missing.length }), () => A.generateSfx(), 'btn primary', 'music'),
+          h('span', { class: 'hint' }, `≈ ${Math.round(secs * 40)} ElevenLabs credits · ${t('sfx_once')}`)) : null,
+        h('div', { class: 'sfx-grid' }, Object.keys(presets).map((k) => h('div', { class: 'sfx-row' + (lib[k] ? '' : ' missing'), title: (presets[k] || {}).prompt || '' },
+          h('code', {}, k),
+          lib[k] ? audioButton(blobUrl(lib[k].blobId)) : h('span', { class: 'hint' }, '—'),
+          h('button', { class: 'btn xs icon', title: lib[k] ? t('regen') : t('generate'), disabled: S.busy.extras, onclick: () => A.generateSfx([k]).catch(() => {}) }, icon('refresh'))))));
+      return box;
+    }));
+    body.append(card('ambient'));
+    body.append(card('camera'));
+    body.append(card('gsap'));
+    if (A.currentVersion()) body.append(h('div', { class: 'hint' }, t('ex_apply_hint')));
+  },
+
   voice(body, A) {
     const p = A.S.p;
     const v = p.voice;
